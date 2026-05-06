@@ -8,5 +8,5 @@ def build_main_workbook() -> Workbook:
     ws = wb.active
     ws.title = "Balance Sheet"
     wb.create_sheet("Income Statement")
-    wb.create_sheet("Cash Flow & Comprehensive Income")
+    wb.create_sheet("Cash Flow &Comprehensive Income")
     return wb

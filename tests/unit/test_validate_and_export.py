@@ -14,7 +14,7 @@ def test_build_main_workbook_sheet_names():
     assert titles == {
         "Balance Sheet",
         "Income Statement",
-        "Cash Flow & Comprehensive Income",
+        "Cash Flow &Comprehensive Income",
     }
 
 
