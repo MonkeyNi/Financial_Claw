@@ -5,10 +5,11 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class ReportFile:
-    company_code: str
-    report_name: str
-    file_path: str
+    company: str
+    pdf_path: str
+    file_name: str
     sha256: str
+    mtime: float
 
     def __post_init__(self) -> None:
         if len(self.sha256) != 64:
