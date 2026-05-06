@@ -1,0 +1,33 @@
+# Core
+pydantic
+PyYAML
+python-dateutil
+typer>=0.12
+rich>=13
+
+# PDF / tables
+pdfplumber
+camelot-py
+pypdf
+
+# OCR
+pytesseract
+pdf2image
+Pillow
+
+# Data & Excel
+pandas
+numpy
+openpyxl
+XlsxWriter
+
+# Matching & LLM
+rapidfuzz
+openai
+httpx
+tenacity
+orjson
+
+# Tests
+pytest
+pytest-cov
