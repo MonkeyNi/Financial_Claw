@@ -1,6 +1,7 @@
 import re
 from pathlib import Path
 
+from loguru import logger
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
@@ -299,7 +300,7 @@ def main():
     for pdf_path in sorted(SOURCE_DIR.glob("*.pdf")):
         output_path, pages = process_pdf(pdf_path)
         located = ", ".join(f"{name}: page {idx + 1}" for name, idx in sorted(pages.items()))
-        print(f"Wrote {output_path} ({located})")
+        logger.info("Wrote {} ({})", output_path, located)
 
 
 if __name__ == "__main__":

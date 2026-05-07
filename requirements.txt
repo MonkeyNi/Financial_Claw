@@ -4,6 +4,7 @@ PyYAML
 python-dateutil
 typer>=0.12
 rich>=13
+loguru>=0.7
 
 # PDF / tables
 pdfplumber

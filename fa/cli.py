@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import typer
+from loguru import logger
 
 app = typer.Typer(help="Financial statement PDF extraction tooling")
 
@@ -13,7 +14,7 @@ def init(
 ):
     """Process every PDF discovered under Financial_Statements/."""
     if dry_run:
-        typer.echo(f"[dry-run] init company={company!r} rebuild={rebuild}")
+        logger.info("[dry-run] init company={!r} rebuild={}", company, rebuild)
         return
     raise NotImplementedError("Full pipeline orchestration arrives in iteration 2")
 
@@ -30,7 +31,7 @@ def update(
 ):
     """Add newly discovered (or explicit) PDFs to the consolidated workbook."""
     if dry_run:
-        typer.echo(f"[dry-run] update company={company!r} files={files or []}")
+        logger.info("[dry-run] update company={!r} files={}", company, files or [])
         return
     raise NotImplementedError("Full pipeline orchestration arrives in iteration 2")
 
