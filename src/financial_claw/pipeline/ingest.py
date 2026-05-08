@@ -195,7 +195,7 @@ def plan_init(company: str, *, root: str | Path = "companies") -> IngestPlan:
 def run_company_init(
     plan: IngestPlan,
     *,
-    output_dir: str | Path = "outputs",
+    output_dir: str | Path | None = None,
     max_workers: int = 8,
     debug: bool = False,
     ocr_provider: Literal["none", "mineru"] = "mineru",
@@ -209,7 +209,7 @@ def run_company_init(
 
     run_start = perf_counter()
     worker_count = max(1, min(int(max_workers), 8, len(plan.inputs) or 1))
-    output_root = Path(output_dir)
+    output_root = Path(output_dir) if output_dir is not None else Path(plan.final_excel_dir)
     logger.info(
         "[company-init] company={} pdfs={} max_workers={} output_dir={} ocr_provider={} mineru_mode={} debug={}",
         plan.company,
@@ -320,7 +320,11 @@ if __name__ == "__main__":
     parser.add_argument("company", nargs="?", default="GOODMAN")
     parser.add_argument("mode", nargs="?", choices=["init", "update"], default="update")
     parser.add_argument("--companies-root", default="companies")
-    parser.add_argument("--output-dir", default="outputs")
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Company init output root. Defaults to companies/<COMPANY>/final_excel.",
+    )
     parser.add_argument("--max-workers", type=int, default=8, help="Maximum parallel PDF extractions; capped at 8.")
     parser.add_argument("--debug", action="store_true", help="Write page text debug files for each PDF.")
     parser.add_argument("--ocr-provider", choices=["none", "mineru"], default="mineru")

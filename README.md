@@ -55,6 +55,8 @@ Run an initial company ingest. This scans every PDF under
 `companies/POSCO/Financial_Statements/`, computes file hashes, and extracts each
 PDF in parallel with up to 8 workers. MinerU OCR fallback is enabled by default;
 only low numeric-density candidate pages are rendered and submitted to MinerU.
+By default, company init writes outputs under
+`companies/POSCO/final_excel/`.
 
 ```bash
 python -m financial_claw.pipeline.ingest POSCO init
@@ -91,6 +93,17 @@ python -m financial_claw.extractor.cli --pdf "companies/POSCO/Financial_Statemen
 ```
 
 Single-PDF extraction writes Excel and debug outputs under `outputs/` by default.
+
+Merge a newly extracted workbook into an existing workbook. The command requires
+both workbooks to contain exactly `Balance Sheet`, `Income Statement`, and
+`Cash Flow Statement`; it writes a new file and leaves both inputs unchanged.
+
+```bash
+python -m financial_claw.core.workbook_merge \
+  companies/LGENSO/final_excel/excel/LGENSO_234Q_LGES_Audit_Report_CONFS_en_statements.xlsx \
+  companies/LGENSO/final_excel/excel/LGENSO_2024_LGES_Audit_Report_Consolidated_FS_ENG_statements.xlsx \
+  -o companies/LGENSO/final_excel/LGENSO_merged.xlsx
+```
 
 ## Tests
 

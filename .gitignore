@@ -12,3 +12,6 @@ outputs/*
 codex/outputs/
 .local_tmp/
 *.egg-info/
+# Company pipeline outputs (Excel, debug)
+companies/**/final_excel/
+~$*.xlsx
