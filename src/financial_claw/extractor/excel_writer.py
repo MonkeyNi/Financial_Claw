@@ -4,17 +4,26 @@ from pathlib import Path
 import re
 
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 from .cleaning_config import CELL_TEXT_REPLACEMENTS
 from .models import ExtractionResult, PageProfile, StatementCandidate
 
-DEFAULT_FONT = Font(name="Arial", size=10, color="000000")
-HEADER_FONT = Font(name="Arial", size=10, bold=True, color="000000")
-HEADER_FILL = PatternFill(fill_type="solid", fgColor="D9E1F2")
+_FONT_FAMILY = "Arial"
+_FONT_SIZE = 10
+_HEADER_FILL = "1F4E78"
+_HEADER_FONT_COLOR = "FFFFFF"
+_ANNUAL_FILL = "D9EAF7"
+_SECTION_FILL = "F2F2F2"
+_TOTAL_FILL = "EAF2F8"
+_BORDER_COLOR = "D9E2F3"
+_STRONG_BORDER_COLOR = "7F7F7F"
+DEFAULT_FONT = Font(name=_FONT_FAMILY, size=_FONT_SIZE, color="000000")
+HEADER_FONT = Font(name=_FONT_FAMILY, size=_FONT_SIZE, bold=True, color=_HEADER_FONT_COLOR)
+HEADER_FILL = PatternFill(fill_type="solid", fgColor=_HEADER_FILL)
 YELLOW_ASSUMPTION_FILL = PatternFill(fill_type="solid", fgColor="FFF200")
 INTEGER_FORMAT = '#,##0;(#,##0);"-"'
-DECIMAL_FORMAT = '#,##0.00;(#,##0.00);"-"'
+DECIMAL_FORMAT = '#,##0.0;(#,##0.0);"-"'
 SCORE_FORMAT = '0.0000;(-0.0000);"-"'
 
 NUMBER_TOKEN_RE = re.compile(r"^\(?-?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?\)?$|^-$")
@@ -188,10 +197,9 @@ def _normalize_number_text(text: str) -> str:
 def _style_statement_sheet(ws) -> None:
     if ws.max_row == 0 or ws.max_column == 0:
         return
-    ws.freeze_panes = "A2"
-    _apply_base_style(ws)
-    _format_numeric_cells(ws)
-    _autofit_columns(ws)
+    ws.freeze_panes = "B2"
+    ws.auto_filter.ref = ws.dimensions
+    _apply_financial_table_style(ws, statement_sheet=True)
 
 
 def _style_record_sheet(ws) -> None:
@@ -199,21 +207,72 @@ def _style_record_sheet(ws) -> None:
         return
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
-    _apply_base_style(ws)
-    for cell in ws[1]:
-        cell.font = HEADER_FONT
-        cell.fill = HEADER_FILL
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    _apply_financial_table_style(ws, statement_sheet=False)
     _highlight_attention_columns(ws)
-    _format_numeric_cells(ws)
+
+
+def _apply_financial_table_style(ws, *, statement_sheet: bool) -> None:
+    thin = Side(style="thin", color=_BORDER_COLOR)
+    strong = Side(style="thin", color=_STRONG_BORDER_COLOR)
+    grid_border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    table_right_border = Border(left=thin, right=strong, top=thin, bottom=thin)
+    total_border = Border(left=thin, right=thin, top=strong, bottom=thin)
+    total_right_border = Border(left=thin, right=strong, top=strong, bottom=thin)
+    header_right_border = Border(left=thin, right=strong, top=thin, bottom=thin)
+    body_font = Font(name=_FONT_FAMILY, size=_FONT_SIZE, color="000000")
+    section_font = Font(name=_FONT_FAMILY, size=_FONT_SIZE, bold=True, color="000000")
+    total_font = Font(name=_FONT_FAMILY, size=_FONT_SIZE, bold=True, color="000000")
+    section_fill = PatternFill(fill_type="solid", fgColor=_SECTION_FILL)
+    total_fill = PatternFill(fill_type="solid", fgColor=_TOTAL_FILL)
+    period_fill = PatternFill(fill_type="solid", fgColor=_ANNUAL_FILL)
+
+    ws.sheet_view.showGridLines = False
+    ws.row_dimensions[1].height = 22
+    max_row = ws.max_row
+    max_col = ws.max_column
+
+    for row_idx in range(1, max_row + 1):
+        row_label = str(ws.cell(row=row_idx, column=1).value or "").strip()
+        is_first_row = row_idx == 1
+        is_section = statement_sheet and _is_section_row(ws, row_idx)
+        is_period = statement_sheet and _is_period_header_row(ws, row_idx)
+        is_total = statement_sheet and _is_total_row_label(row_label)
+        for col_idx in range(1, max_col + 1):
+            cell = ws.cell(row=row_idx, column=col_idx)
+            val = cell.value
+            cell.border = table_right_border if col_idx == max_col else grid_border
+            cell.font = body_font
+            cell.alignment = Alignment(
+                horizontal="left" if col_idx == 1 else "right",
+                vertical="top",
+                wrap_text=True,
+            )
+
+            if is_first_row:
+                cell.font = HEADER_FONT
+                cell.fill = HEADER_FILL
+                cell.alignment = Alignment(horizontal="center" if col_idx > 1 else "left", vertical="center", wrap_text=True)
+                cell.border = header_right_border if col_idx == max_col else grid_border
+                continue
+
+            if is_period:
+                cell.fill = period_fill
+                cell.font = Font(name=_FONT_FAMILY, size=_FONT_SIZE, bold=True, color="000000")
+
+            if is_section:
+                cell.fill = section_fill
+                cell.font = section_font
+
+            if is_total:
+                cell.fill = total_fill
+                cell.font = total_font
+                cell.border = total_right_border if col_idx == max_col else total_border
+
+            if _is_numeric_cell_value(val):
+                cell.number_format = SCORE_FORMAT if _is_score_column(ws, col_idx) else _number_format_for_value(val)
+                cell.alignment = Alignment(horizontal="right", vertical="top", wrap_text=True)
+
     _autofit_columns(ws)
-
-
-def _apply_base_style(ws) -> None:
-    for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
-        for cell in row:
-            cell.font = DEFAULT_FONT
-            cell.alignment = Alignment(vertical="top", wrap_text=True)
 
 
 def _highlight_attention_columns(ws) -> None:
@@ -225,16 +284,21 @@ def _highlight_attention_columns(ws) -> None:
         ws.cell(row=1, column=col).fill = YELLOW_ASSUMPTION_FILL
 
 
-def _format_numeric_cells(ws) -> None:
+def _is_numeric_cell_value(value: object) -> bool:
+    if isinstance(value, bool):
+        return False
+    return isinstance(value, (int, float))
+
+
+def _number_format_for_value(value: int | float) -> str:
+    if isinstance(value, float) and not value.is_integer():
+        return DECIMAL_FORMAT
+    return INTEGER_FORMAT
+
+
+def _is_score_column(ws, col_idx: int) -> bool:
     score_col = _find_column_by_header(ws, "score")
-    for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
-        for cell in row:
-            if isinstance(cell.value, int):
-                cell.number_format = INTEGER_FORMAT
-                cell.alignment = Alignment(horizontal="right", vertical="top", wrap_text=True)
-            elif isinstance(cell.value, float):
-                cell.number_format = SCORE_FORMAT if cell.column == score_col else DECIMAL_FORMAT
-                cell.alignment = Alignment(horizontal="right", vertical="top", wrap_text=True)
+    return score_col == col_idx
 
 
 def _find_column_by_header(ws, header_name: str) -> int | None:
@@ -244,6 +308,45 @@ def _find_column_by_header(ws, header_name: str) -> int | None:
         if str(cell.value or "").strip().lower() == header_name:
             return idx
     return None
+
+
+def _is_section_row(ws, row_idx: int) -> bool:
+    values = [ws.cell(row=row_idx, column=col_idx).value for col_idx in range(2, ws.max_column + 1)]
+    return bool(ws.cell(row=row_idx, column=1).value) and all(value in (None, "") for value in values)
+
+
+def _is_period_header_row(ws, row_idx: int) -> bool:
+    row_values = [str(ws.cell(row=row_idx, column=col_idx).value or "").strip() for col_idx in range(1, ws.max_column + 1)]
+    text = " ".join(value for value in row_values if value).lower()
+    if not text:
+        return False
+    if "note" in text and re.search(r"\b(?:19|20)\d{2}\b", text):
+        return True
+    if "for the " in text and re.search(r"\b(?:19|20)\d{2}\b", text):
+        return True
+    if "december 31" in text or "march 31" in text or "september 30" in text:
+        return True
+    return False
+
+
+def _is_total_row_label(label: str) -> bool:
+    normalized = label.strip().lower()
+    if not normalized:
+        return False
+    return normalized.startswith(
+        (
+            "total ",
+            "net ",
+            "gross profit",
+            "operating profit",
+            "profit for",
+            "profit before",
+            "cash and cash equivalents at end",
+            "net cash provided",
+            "net cash used",
+            "total comprehensive income",
+        )
+    )
 
 
 def _autofit_columns(ws) -> None:
@@ -257,4 +360,45 @@ def _autofit_columns(ws) -> None:
             length = max(len(part) for part in lines)
             if length > max_len:
                 max_len = length
-        ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = max(10, min(60, max_len + 2))
+        letter = ws.cell(row=1, column=col_idx).column_letter
+        if col_idx == 1:
+            width = max(36, min(70, max_len + 2))
+        elif _is_notes_column(ws, col_idx):
+            width = max(10, min(14, max_len + 2))
+        else:
+            width = max(14, min(20, max_len + 2))
+        ws.column_dimensions[letter].width = width
+
+    _auto_height_wrapped_rows(ws)
+
+
+def _is_notes_column(ws, col_idx: int) -> bool:
+    for row_idx in range(1, min(ws.max_row, 8) + 1):
+        value = str(ws.cell(row=row_idx, column=col_idx).value or "").strip().lower()
+        if value in {"note", "notes"}:
+            return True
+    return False
+
+
+def _auto_height_wrapped_rows(ws) -> None:
+    for row_idx in range(1, min(ws.max_row, 12) + 1):
+        max_lines = 1
+        for col_idx in range(1, ws.max_column + 1):
+            value = ws.cell(row=row_idx, column=col_idx).value
+            if value is None:
+                continue
+            text = str(value)
+            parts = text.splitlines() or [""]
+            column_width = ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width or 10
+            usable_width = max(8, int(column_width) - 2)
+            explicit_lines = len(parts)
+            approx_lines = max(
+                1,
+                max(
+                    (len(part) + usable_width - 1) // usable_width
+                    for part in parts
+                ),
+            )
+            max_lines = max(max_lines, explicit_lines, approx_lines)
+        if max_lines > 1:
+            ws.row_dimensions[row_idx].height = min(90, 15 * max_lines)
