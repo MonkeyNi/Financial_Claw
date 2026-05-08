@@ -117,10 +117,17 @@ def _is_non_table_row(row: list[str]) -> bool:
     text = " ".join(str(cell) for cell in row if cell).strip().lower()
     if not text:
         return False
+    if _is_page_number_text(text):
+        return True
     non_table_terms = [
         "the accompanying notes are an integral part",
         "are an integral part of the consolidated financial statements",
         "are an integral part of the interim condensed consolidated financial",
+        "are to be read in conjunction with the accompanying notes",
+        "to be read in conjunction with the accompanying notes",
+        "form part of these consolidated financial statements",
+        "approved and authorised for issue by the board of directors",
+        "approved and authorized for issue by the board of directors",
         "statements.",
     ]
     return any(term in text for term in non_table_terms)
@@ -129,6 +136,10 @@ def _is_non_table_row(row: list[str]) -> bool:
 def _is_repeated_header_row(row: list[str]) -> bool:
     text = " ".join(str(cell) for cell in row if cell).strip().lower()
     if not text:
+        return True
+    if _is_statement_title_text(text) or _is_unit_context_text(text):
+        return True
+    if _is_continuation_column_header_row(row):
         return True
     repeated_terms = [
         "consolidated statement",
@@ -152,9 +163,33 @@ def _is_repeated_header_row(row: list[str]) -> bool:
     return False
 
 
+def _is_continuation_column_header_row(row: list[str]) -> bool:
+    non_empty = [str(cell).strip() for cell in row if str(cell).strip()]
+    if not non_empty:
+        return True
+    text = " ".join(non_empty).lower()
+    if _is_unit_context_text(text):
+        return True
+    if all(_is_structural_header_cell(cell) for cell in non_empty):
+        return True
+    if _looks_like_entity_column_header(non_empty):
+        return True
+    return False
+
+
+def _looks_like_entity_column_header(cells: list[str]) -> bool:
+    if len(cells) > 6:
+        return False
+    if any(_is_amount_token(cell) or re.fullmatch(r"\d{4}", cell.strip()) for cell in cells):
+        return False
+    if any(_is_structural_header_cell(cell) for cell in cells):
+        return False
+    return all(re.search(r"[A-Za-z]", cell) and len(cell.split()) <= 3 for cell in cells)
+
+
 def extract_page_rows(page: fitz.Page) -> list[list[str]]:
     lines = page_lines_from_words(page)
-    table_lines = [line for line in lines if _line_in_body(line, page) and _line_is_financial_table_like(line)]
+    table_lines = [line for line in lines if _line_in_body(line, page) and _line_is_financial_table_like(line, page)]
     if not table_lines:
         table_lines = [line for line in lines if _line_in_body(line, page)]
     anchors = _infer_numeric_anchors(table_lines)
@@ -163,6 +198,7 @@ def extract_page_rows(page: fitz.Page) -> list[list[str]]:
         row = _line_to_cells(line, anchors)
         if any(cell.strip() for cell in row):
             rows.append(row)
+    rows = _merge_leading_label_fragments(rows)
     return _merge_label_continuation_rows(_merge_multiline_headers(rows))
 
 
@@ -171,16 +207,38 @@ def _line_in_body(line: list[tuple], page: fitz.Page) -> bool:
     return 45 <= y <= float(page.rect.height) - 30
 
 
-def _line_is_financial_table_like(line: list[tuple]) -> bool:
+def _is_top_table_header_text(line: list[tuple], page: fitz.Page) -> bool:
+    y = min(float(w[1]) for w in line)
+    if y > min(180.0, float(page.rect.height) * 0.25):
+        return False
+    words = [str(w[4]).strip() for w in line if str(w[4]).strip()]
+    if not 1 <= len(words) <= 6:
+        return False
+    text = " ".join(words)
+    low = text.lower()
+    if any(NUMBER_RE.match(word.replace(",", "")) for word in words):
+        return False
+    if any(term in low for term in ("annual report", "auditor", "director", "chairman")):
+        return False
+    if _is_non_table_row([text]):
+        return False
+    return bool(re.search(r"[A-Za-z]", text))
+
+
+def _line_is_financial_table_like(line: list[tuple], page: fitz.Page) -> bool:
     words = [str(w[4]) for w in line]
     text = " ".join(words)
     if _is_section_label_text(text):
+        return True
+    if _is_top_table_header_text(line, page):
         return True
     if len(words) <= 1:
         return False
     if any(NUMBER_RE.match(word.replace(",", "")) for word in words):
         return True
     low = text.lower()
+    if _is_unit_context_text(low):
+        return True
     return any(
         token in low
         for token in [
@@ -194,6 +252,7 @@ def _line_is_financial_table_like(line: list[tuple]) -> bool:
             "payable",
             "receivable",
             "equity",
+            "financial position",
             "$m",
             "note",
         ]
@@ -297,6 +356,9 @@ def _mean(values: list[float]) -> float:
 
 def _line_to_cells(line: list[tuple], anchors: list[float]) -> list[str]:
     words = sorted(line, key=lambda w: w[0])
+    text = " ".join(str(w[4]) for w in words)
+    if _is_unit_context_text(text) or _is_statement_title_text(text):
+        return [text]
     if not anchors:
         return [" ".join(str(w[4]) for w in words)]
     cells = [[] for _ in range(len(anchors) + 1)]
@@ -314,6 +376,52 @@ def _line_to_cells(line: list[tuple], anchors: list[float]) -> list[str]:
         idx = max(0, min(idx, len(cells) - 1))
         cells[idx].append(token)
     return [" ".join(cell).strip() for cell in cells]
+
+
+def _merge_leading_label_fragments(rows: list[list[str]]) -> list[list[str]]:
+    merged_rows: list[list[str]] = []
+    for row in rows:
+        merged_rows.append(_merge_leading_label_fragment(row))
+    return merged_rows
+
+
+def _merge_leading_label_fragment(row: list[str]) -> list[str]:
+    if len(row) < 3 or not row[0] or not row[1]:
+        return row
+    fragment = str(row[1]).strip()
+    if not fragment or _should_keep_as_structured_column(fragment):
+        return row
+    new_row = row[:]
+    new_row[0] = f"{new_row[0]} {fragment}".strip()
+    new_row[1] = ""
+    return new_row
+
+
+def _should_keep_as_structured_column(text: str) -> bool:
+    normalized = text.strip()
+    structural = _strip_currency_markers(normalized).strip()
+    low = normalized.lower()
+    if not normalized:
+        return True
+    if low in {"note", "notes"}:
+        return True
+    if re.fullmatch(r"\d{4}", normalized):
+        return True
+    if _is_amount_token(normalized):
+        return True
+    if re.fullmatch(r"\d+(?:\s*,\s*\d+)*", structural):
+        return True
+    return False
+
+
+def _strip_currency_markers(text: str) -> str:
+    return (
+        text.replace("￦", "")
+        .replace("¥", "")
+        .replace("$", "")
+        .replace("HK$", "")
+        .replace("US$", "")
+    )
 
 
 def _is_standalone_currency_marker(token: str) -> bool:
@@ -350,6 +458,10 @@ def _looks_like_header_label(label: str) -> bool:
         "as at",
         "as of",
         "expressed in",
+        "korean won in millions",
+        "won in millions",
+        "in millions",
+        "in thousands",
         "consolidated",
         "interim condensed",
     ]
@@ -377,6 +489,8 @@ def _merge_header_band(rows: list[list[str]]) -> list[list[str]]:
 
     if not column_rows:
         return leading_rows + section_rows
+    if any(_column_row_has_entity_label(row) for row in column_rows):
+        return leading_rows + column_rows + section_rows
 
     width = max(len(row) for row in column_rows)
     merged = [""] * width
@@ -392,6 +506,29 @@ def _merge_header_band(rows: list[list[str]]) -> list[list[str]]:
 def _row_is_statement_context(row: list[str]) -> bool:
     text = " ".join(str(cell) for cell in row if cell).lower()
     return text.startswith(("as of ", "as at ", "for each ", "for the year ", "for the period "))
+
+
+def _column_row_has_entity_label(row: list[str]) -> bool:
+    for idx, cell in enumerate(row):
+        text = str(cell or "").strip()
+        if idx == 0 or not text:
+            continue
+        if _is_structural_header_cell(text):
+            continue
+        if re.search(r"[A-Za-z]", text):
+            return True
+    return False
+
+
+def _is_structural_header_cell(text: str) -> bool:
+    normalized = text.strip().lower()
+    if normalized in {"note", "notes", "$m", "$000", "$", "m"}:
+        return True
+    if re.fullmatch(r"\d{4}", normalized):
+        return True
+    if re.fullmatch(r"(?:19|20)\d{2}\s*[\n ]+\$?m", normalized):
+        return True
+    return False
 
 
 def _is_section_label_row(row: list[str]) -> bool:
@@ -410,6 +547,9 @@ def _is_section_label_text(text: str) -> bool:
         "non-current liabilities",
         "equity",
         "revenue",
+        "cash flows from operating activities",
+        "cash flows from investing activities",
+        "cash flows from financing activities",
     }
     return normalized in section_labels
 
@@ -435,6 +575,10 @@ def _is_label_only_continuation(row: list[str]) -> bool:
     if len(non_empty) != 1 or not row or not row[0]:
         return False
     label = row[0].strip().lower()
+    if _is_unit_context_text(label):
+        return False
+    if label.endswith(":"):
+        return False
     section_labels = {
         "assets",
         "current assets",
@@ -444,9 +588,41 @@ def _is_label_only_continuation(row: list[str]) -> bool:
         "non-current liabilities",
         "equity",
         "revenue",
+        "cash flows from operating activities",
+        "cash flows from investing activities",
+        "cash flows from financing activities",
     }
     return label not in section_labels and len(label.split()) >= 3
 
 
 def _row_has_numeric_amount(row: list[str]) -> bool:
     return any(cell and _is_amount_token(str(cell)) for cell in row[1:])
+
+
+def _is_page_number_text(text: str) -> bool:
+    normalized = text.strip().replace("–", "-").replace("—", "-")
+    return bool(re.fullmatch(r"-\s*\d+\s*-", normalized))
+
+
+def _is_unit_context_text(text: str) -> bool:
+    normalized = text.strip().lower()
+    return bool(
+        re.search(
+            r"\((?:korean\s+)?won\s+in\s+(?:millions|thousands)\)",
+            normalized,
+        )
+        or re.search(r"\((?:us\s+)?dollars?\s+in\s+(?:millions|thousands)\)", normalized)
+        or re.search(r"\bin\s+(?:millions|thousands)\b", normalized)
+    )
+
+
+def _is_statement_title_text(text: str) -> bool:
+    normalized = text.strip().lower()
+    return bool(
+        re.search(
+            r"\bconsolidated\s+statements?\s+of\s+"
+            r"(?:financial\s+position|comprehensive\s+income|cash\s+flows?|profit\s+or\s+loss)",
+            normalized,
+        )
+        or re.search(r"\bconsolidated\s+(?:income|cash\s+flow)\s+statements?\b", normalized)
+    )
