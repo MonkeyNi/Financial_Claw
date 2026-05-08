@@ -11,3 +11,4 @@ outputs/*
 !outputs/.gitkeep
 codex/outputs/
 .local_tmp/
+*.egg-info/

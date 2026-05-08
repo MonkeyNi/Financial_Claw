@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+from time import perf_counter
+
+from loguru import logger
 
 from .pymupdf_compat import fitz
 
@@ -18,23 +21,45 @@ def extract_candidate_tables(
     candidates: list[StatementCandidate],
     ocr_provider: MinerUOCRProvider | None = None,
 ) -> list[ExtractionResult]:
+    start = perf_counter()
+    logger.info("Opening PDF for table extraction: {}", pdf_path)
     doc = fitz.open(pdf_path)
     page_rows_by_number: dict[int, list[list[str]]] = {}
     low_density_pages: set[int] = set()
+    candidate_pages = sorted({page for candidate in candidates for page in candidate.source_pages})
+    logger.info("Extracting embedded-text rows from {} candidate page(s): {}", len(candidate_pages), candidate_pages)
     for candidate in candidates:
         for page_number in candidate.source_pages:
             if page_number in page_rows_by_number:
                 continue
+            page_start = perf_counter()
             page_rows = extract_page_rows(doc.load_page(page_number - 1))
             page_rows_by_number[page_number] = page_rows
-            if ocr_provider is not None and _count_numeric_cells(page_rows) < 4:
+            numeric_cells = _count_numeric_cells(page_rows)
+            logger.info(
+                "Embedded extraction page={} rows={} numeric_cells={} elapsed={:.2f}s",
+                page_number,
+                len(page_rows),
+                numeric_cells,
+                perf_counter() - page_start,
+            )
+            if ocr_provider is not None and numeric_cells < 4:
                 low_density_pages.add(page_number)
 
+    if ocr_provider is not None:
+        if low_density_pages:
+            logger.info("Low-density page(s) requiring OCR fallback: {}", sorted(low_density_pages))
+        else:
+            logger.info("No pages require OCR fallback.")
+
+    ocr_start = perf_counter()
     ocr_results = (
         ocr_provider.extract_pages_tables(pdf_path, sorted(low_density_pages))
         if ocr_provider is not None and low_density_pages
         else {}
     )
+    if ocr_results:
+        logger.info("OCR fallback returned {} page result(s) in {:.2f}s", len(ocr_results), perf_counter() - ocr_start)
 
     results: list[ExtractionResult] = []
     for candidate in candidates:
@@ -60,6 +85,16 @@ def extract_candidate_tables(
         elif numeric_cells < 4:
             warnings.append("Low numeric/table density from embedded text; OCR fallback likely required.")
         results.append(ExtractionResult(candidate=candidate, rows=rows, warnings=warnings))
+        logger.info(
+            "Candidate table complete: type={} pages={}..{} rows={} numeric_cells={} warnings={}",
+            candidate.statement_type,
+            candidate.page_start,
+            candidate.page_end,
+            len(rows),
+            numeric_cells,
+            len(warnings),
+        )
+    logger.info("Table extraction complete in {:.2f}s", perf_counter() - start)
     return results
 
 

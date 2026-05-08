@@ -30,6 +30,7 @@ companies/
 ```bash
 conda activate base
 python -m pip install -r requirements.txt
+python -m pip install -e .
 ```
 
 ### System dependencies
@@ -42,10 +43,50 @@ Copy `.env.example` to `.env` and export the variables (or use `direnv`).
 
 ## CLI quickstart
 
+Commands below assume the package has been installed with `python -m pip install
+-e .`. For one-off runs without installing, prefix commands with
+`PYTHONPATH=src`, for example:
+
+```bash
+PYTHONPATH=src python -m financial_claw.extractor.cli --help
+```
+
+Run an initial company ingest. This scans every PDF under
+`companies/POSCO/Financial_Statements/`, computes file hashes, and extracts each
+PDF in parallel with up to 8 workers. MinerU OCR fallback is enabled by default;
+only low numeric-density candidate pages are rendered and submitted to MinerU.
+
 ```bash
 python -m financial_claw.pipeline.ingest POSCO init
+```
+
+Preview the initial ingest plan without extracting PDFs.
+
+```bash
+python -m financial_claw.pipeline.ingest POSCO init --plan-only
+```
+
+Plan an incremental company ingest. If `companies/POSCO/final_excel/` has no
+Excel outputs yet, it behaves like `init`; otherwise it uses `.processed.json`
+to report only new or explicitly selected PDFs.
+
+```bash
 python -m financial_claw.pipeline.ingest POSCO update
+```
+
+Extract one PDF using embedded PDF text and coordinate-based table parsing. The
+`--debug` flag writes page text, statement candidates, and metadata alongside
+the Excel workbook.
+
+```bash
 python -m financial_claw.extractor.cli --pdf "companies/GOODMAN/Financial_Statements/2 Goodman 2025 Annual Report.pdf" --debug
+```
+
+Extract one PDF with MinerU OCR fallback enabled. This keeps the normal embedded
+text path first, then renders low numeric-density candidate pages and sends only
+those pages to MinerU precision mode.
+
+```bash
 python -m financial_claw.extractor.cli --pdf "companies/POSCO/Financial_Statements/POSCO Holdings_consolidated_FY25 1Q.pdf" --debug --ocr-provider mineru --mineru-mode precision --ocr-language en
 ```
 

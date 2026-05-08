@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from typing import Iterable, Literal
 
 from loguru import logger
 
 try:
     from financial_claw.core.models import ReportFile
+    from financial_claw.extractor.cli import PdfExtractionConfig, PdfExtractionSummary, run_pdf_extraction
 except ModuleNotFoundError:  # allows direct script execution from repo root
     import sys
 
@@ -17,6 +21,11 @@ except ModuleNotFoundError:  # allows direct script execution from repo root
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
     from financial_claw.core.models import ReportFile  # type: ignore[no-redef]
+    from financial_claw.extractor.cli import (  # type: ignore[no-redef]
+        PdfExtractionConfig,
+        PdfExtractionSummary,
+        run_pdf_extraction,
+    )
 
 
 def select_input_files(
@@ -155,6 +164,21 @@ class IngestPlan:
     inputs: list[ReportFile]
 
 
+@dataclass(frozen=True)
+class CompanyRunFailure:
+    report: ReportFile
+    error: str
+
+
+@dataclass(frozen=True)
+class CompanyRunSummary:
+    company: str
+    mode: Literal["init", "update"]
+    succeeded: list[PdfExtractionSummary]
+    failed: list[CompanyRunFailure]
+    elapsed_s: float
+
+
 def plan_init(company: str, *, root: str | Path = "companies") -> IngestPlan:
     reports = discover_company_pdfs(company, root=root)
     return IngestPlan(
@@ -166,6 +190,95 @@ def plan_init(company: str, *, root: str | Path = "companies") -> IngestPlan:
         manifest_path=str(manifest_path(company, root=root)),
         inputs=reports,
     )
+
+
+def run_company_init(
+    plan: IngestPlan,
+    *,
+    output_dir: str | Path = "outputs",
+    max_workers: int = 8,
+    debug: bool = False,
+    ocr_provider: Literal["none", "mineru"] = "mineru",
+    mineru_mode: Literal["precision", "agent"] = "precision",
+    ocr_language: str = "en",
+    render_dpi: int = 220,
+    max_continuation_pages: int = 3,
+) -> CompanyRunSummary:
+    if plan.mode != "init":
+        raise ValueError(f"run_company_init requires an init plan, got {plan.mode!r}")
+
+    run_start = perf_counter()
+    worker_count = max(1, min(int(max_workers), 8, len(plan.inputs) or 1))
+    output_root = Path(output_dir)
+    logger.info(
+        "[company-init] company={} pdfs={} max_workers={} output_dir={} ocr_provider={} mineru_mode={} debug={}",
+        plan.company,
+        len(plan.inputs),
+        worker_count,
+        output_root,
+        ocr_provider,
+        mineru_mode,
+        debug,
+    )
+
+    succeeded: list[PdfExtractionSummary] = []
+    failed: list[CompanyRunFailure] = []
+    if not plan.inputs:
+        elapsed_s = perf_counter() - run_start
+        logger.warning("[company-init-done] company={} no PDFs found elapsed={:.2f}s", plan.company, elapsed_s)
+        return CompanyRunSummary(plan.company, plan.mode, succeeded, failed, elapsed_s)
+
+    def run_one(index: int, report: ReportFile) -> PdfExtractionSummary:
+        logger.info("[pdf-start] {}/{} company={} file={}", index, len(plan.inputs), plan.company, report.file_name)
+        pdf_start = perf_counter()
+        summary = run_pdf_extraction(
+            PdfExtractionConfig(
+                pdf_path=Path(report.pdf_path),
+                output_dir=output_root,
+                company=plan.company,
+                debug=debug,
+                max_continuation_pages=max_continuation_pages,
+                ocr_provider=ocr_provider,
+                mineru_mode=mineru_mode,
+                ocr_language=ocr_language,
+                render_dpi=render_dpi,
+            )
+        )
+        logger.info(
+            "[pdf-done] {}/{} file={} elapsed={:.2f}s output={}",
+            index,
+            len(plan.inputs),
+            report.file_name,
+            perf_counter() - pdf_start,
+            summary.output_path,
+        )
+        return summary
+
+    with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="financial-claw-init") as executor:
+        future_to_report = {
+            executor.submit(run_one, idx, report): report
+            for idx, report in enumerate(plan.inputs, start=1)
+        }
+        for future in as_completed(future_to_report):
+            report = future_to_report[future]
+            try:
+                succeeded.append(future.result())
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("[pdf-failed] company={} file={} error={}", plan.company, report.file_name, exc)
+                failed.append(CompanyRunFailure(report=report, error=str(exc)))
+
+    elapsed_s = perf_counter() - run_start
+    logger.info(
+        "[company-init-done] company={} succeeded={} failed={} elapsed={:.2f}s",
+        plan.company,
+        len(succeeded),
+        len(failed),
+        elapsed_s,
+    )
+    if failed:
+        for item in failed:
+            logger.error("[company-init-failure] file={} error={}", item.report.file_name, item.error)
+    return CompanyRunSummary(plan.company, plan.mode, succeeded, failed, elapsed_s)
 
 
 def plan_update(
@@ -203,16 +316,23 @@ def plan_update(
 
 
 if __name__ == "__main__":
-    import sys
+    parser = argparse.ArgumentParser(description="Company-level financial statement ingestion.")
+    parser.add_argument("company", nargs="?", default="GOODMAN")
+    parser.add_argument("mode", nargs="?", choices=["init", "update"], default="update")
+    parser.add_argument("--companies-root", default="companies")
+    parser.add_argument("--output-dir", default="outputs")
+    parser.add_argument("--max-workers", type=int, default=8, help="Maximum parallel PDF extractions; capped at 8.")
+    parser.add_argument("--debug", action="store_true", help="Write page text debug files for each PDF.")
+    parser.add_argument("--ocr-provider", choices=["none", "mineru"], default="mineru")
+    parser.add_argument("--mineru-mode", choices=["precision", "agent"], default="precision")
+    parser.add_argument("--ocr-language", default="en")
+    parser.add_argument("--render-dpi", type=int, default=220)
+    parser.add_argument("--max-continuation-pages", type=int, default=3)
+    parser.add_argument("--plan-only", action="store_true", help="Only print the ingest plan; do not extract PDFs.")
+    args = parser.parse_args()
 
-    cwd_root = Path.cwd() / "companies"
-    company = sys.argv[1] if len(sys.argv) > 1 else "GOODMAN"
-    mode = sys.argv[2].lower() if len(sys.argv) > 2 else "update"
-
-    if mode not in {"init", "update"}:
-        raise SystemExit("usage: python -m financial_claw.pipeline.ingest [COMPANY] [init|update]")
-
-    plan = plan_init(company, root=cwd_root) if mode == "init" else plan_update(company, root=cwd_root)
+    cwd_root = Path(args.companies_root)
+    plan = plan_init(args.company, root=cwd_root) if args.mode == "init" else plan_update(args.company, root=cwd_root)
     logger.info("mode={} company={}", plan.mode, plan.company)
     logger.info("financial_statements_dir={}", plan.financial_statements_dir)
     logger.info("final_excel_dir={}", plan.final_excel_dir)
@@ -220,3 +340,18 @@ if __name__ == "__main__":
     logger.info("inputs={}", len(plan.inputs))
     for r in plan.inputs[:20]:
         logger.info("- {} sha256={}... mtime={}", r.file_name, r.sha256[:12], r.mtime)
+
+    if args.mode == "init" and not args.plan_only:
+        summary = run_company_init(
+            plan,
+            output_dir=args.output_dir,
+            max_workers=args.max_workers,
+            debug=args.debug,
+            ocr_provider=args.ocr_provider,
+            mineru_mode=args.mineru_mode,
+            ocr_language=args.ocr_language,
+            render_dpi=args.render_dpi,
+            max_continuation_pages=args.max_continuation_pages,
+        )
+        if summary.failed:
+            raise SystemExit(1)
