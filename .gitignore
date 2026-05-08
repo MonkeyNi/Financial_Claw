@@ -1,7 +1,13 @@
 .worktrees/
 __pycache__/
+**/__pycache__/
 *.py[cod]
 .pytest_cache/
 minimax/.env
 mineru/.env
+src/**/.env
 table.xlsx
+outputs/*
+!outputs/.gitkeep
+codex/outputs/
+.local_tmp/

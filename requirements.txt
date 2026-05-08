@@ -26,6 +26,7 @@ XlsxWriter
 rapidfuzz
 openai
 httpx
+requests
 tenacity
 orjson
 
