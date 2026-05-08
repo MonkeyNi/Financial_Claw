@@ -1,4 +1,0 @@
-"""
-Local MinerU helpers/scripts.
-"""
-

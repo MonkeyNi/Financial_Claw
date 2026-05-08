@@ -9,14 +9,14 @@ from typing import Iterable, Literal
 from loguru import logger
 
 try:
-    from fa.models import ReportFile
-except ModuleNotFoundError:  # allows `python fa/ingest.py ...` from repo root
+    from financial_claw.core.models import ReportFile
+except ModuleNotFoundError:  # allows direct script execution from repo root
     import sys
 
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = Path(__file__).resolve().parents[3]
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
-    from fa.models import ReportFile  # type: ignore[no-redef]
+    from financial_claw.core.models import ReportFile  # type: ignore[no-redef]
 
 
 def select_input_files(
@@ -210,7 +210,7 @@ if __name__ == "__main__":
     mode = sys.argv[2].lower() if len(sys.argv) > 2 else "update"
 
     if mode not in {"init", "update"}:
-        raise SystemExit("usage: python fa/ingest.py [COMPANY] [init|update]")
+        raise SystemExit("usage: python -m financial_claw.pipeline.ingest [COMPANY] [init|update]")
 
     plan = plan_init(company, root=cwd_root) if mode == "init" else plan_update(company, root=cwd_root)
     logger.info("mode={} company={}", plan.mode, plan.company)
