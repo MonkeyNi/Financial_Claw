@@ -14,5 +14,5 @@ codex/outputs/
 *.egg-info/
 # Company pipeline outputs (Excel, debug)
 companies/**/final_excel/
-companies/**/*_financial_statements_final.xlsx
+companies/**/*_financial_statements_final*.xlsx
 ~$*.xlsx

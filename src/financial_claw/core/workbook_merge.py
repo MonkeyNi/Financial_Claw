@@ -137,10 +137,12 @@ def parse_statement_sheet(ws) -> ParsedSheet:
             continue
         seen[key_base] = seen.get(key_base, 0) + 1
         key = f"{key_base}#{seen[key_base]}"
-        values = {
-            period.label: ws.cell(row=row_idx, column=col_idx).value
-            for col_idx, period in periods.items()
-        }
+        values: dict[str, object] = {}
+        for col_idx, period in periods.items():
+            # Interim statements can contain both current-quarter and YTD columns
+            # that resolve to the same quarter label. Keep the first occurrence,
+            # which is normally the standalone quarter column in the source table.
+            values.setdefault(period.label, ws.cell(row=row_idx, column=col_idx).value)
         rows.append(StatementRow(label=label, key=key, values=values))
     return ParsedSheet(title=title, periods=periods, rows=rows)
 
@@ -149,10 +151,11 @@ def _find_period_header(ws) -> tuple[int, dict[int, Period]]:
     best_row = 0
     best_periods: dict[int, Period] = {}
     for row_idx in range(1, min(ws.max_row, 12) + 1):
+        context = _header_context(ws, row_idx)
         periods: dict[int, Period] = {}
         for col_idx in range(1, ws.max_column + 1):
-            period = parse_period(ws.cell(row=row_idx, column=col_idx).value)
-            if period is not None:
+            period = parse_period_with_context(ws.cell(row=row_idx, column=col_idx).value, context)
+            if period is not None and _looks_like_period_value_column(ws, row_idx, col_idx):
                 periods[col_idx] = period
         if len(periods) > len(best_periods):
             best_row = row_idx
@@ -160,6 +163,60 @@ def _find_period_header(ws) -> tuple[int, dict[int, Period]]:
     if not best_periods:
         raise ValueError(f"Could not find period header row in sheet {ws.title!r}")
     return best_row, best_periods
+
+
+def _looks_like_period_value_column(ws, header_row: int, col_idx: int) -> bool:
+    numeric_count = 0
+    text_count = 0
+    for row_idx in range(header_row + 1, min(ws.max_row, header_row + 25) + 1):
+        value = ws.cell(row=row_idx, column=col_idx).value
+        if value in (None, ""):
+            continue
+        if _is_numeric_like(value):
+            numeric_count += 1
+        else:
+            text_count += 1
+    return numeric_count > 0 and numeric_count >= text_count
+
+
+def _is_numeric_like(value: object) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float, Decimal)):
+        return True
+    text = str(value).strip()
+    if not text:
+        return False
+    text = text.replace(",", "").replace(" ", "")
+    if re.fullmatch(r"\(?-?\d+(?:\.\d+)?\)?", text):
+        return True
+    return text == "-"
+
+
+def _header_context(ws, row_idx: int) -> str:
+    start = max(1, row_idx - 2)
+    parts: list[str] = []
+    for current_row in range(start, row_idx + 1):
+        for col_idx in range(1, ws.max_column + 1):
+            value = ws.cell(row=current_row, column=col_idx).value
+            if value is not None:
+                parts.append(str(value))
+    return " ".join(parts)
+
+
+def parse_period_with_context(value: object, context: str) -> Period | None:
+    period = parse_period(value)
+    if period is None or period.kind != "annual":
+        return period
+
+    text = str(value or "")
+    if re.search(r"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b", text, re.I):
+        return period
+
+    quarter = _quarter_from_context(context)
+    if quarter is None:
+        return period
+    return Period(label=f"Q{quarter} {period.year}", kind="quarter", year=period.year, quarter=quarter)
 
 
 def parse_period(value: object) -> Period | None:
@@ -188,10 +245,54 @@ def parse_period(value: object) -> Period | None:
         quarter = int(fy_quarter_match.group(2))
         return Period(label=f"Q{quarter} {year}", kind="quarter", year=year, quarter=quarter)
 
+    interim_period = _parse_interim_period(normalized)
+    if interim_period is not None:
+        return interim_period
+
     year_match = re.search(r"\b(20\d{2})\b", normalized)
     if year_match:
         year = int(year_match.group(1))
         return Period(label=str(year), kind="annual", year=year)
+    return None
+
+
+def _parse_interim_period(text: str) -> Period | None:
+    normalized = re.sub(r"\s+", " ", text.replace("(", " (")).strip()
+    month_day_year = re.search(
+        r"\b(march|jun(?:e)?|sept(?:ember)?)\s+([0-3]?\d)\b[^0-9]{0,80}\b(20\d{2})\b",
+        normalized,
+        re.I,
+    )
+    if not month_day_year:
+        return None
+
+    month = month_day_year.group(1).lower()
+    day = int(month_day_year.group(2))
+    year = int(month_day_year.group(3))
+    quarter = _quarter_from_month_day(month, day)
+    if quarter is None:
+        return None
+    return Period(label=f"Q{quarter} {year}", kind="quarter", year=year, quarter=quarter)
+
+
+def _quarter_from_context(text: str) -> int | None:
+    normalized = re.sub(r"\s+", " ", text).lower()
+    if re.search(r"\bmarch\s+31\b", normalized) or "three-month" in normalized or "three month" in normalized:
+        return 1
+    if re.search(r"\bjun(?:e)?\s+30\b", normalized) or "six-month" in normalized or "six month" in normalized:
+        return 2
+    if re.search(r"\bsept(?:ember)?\s+30\b", normalized) or "nine-month" in normalized or "nine month" in normalized:
+        return 3
+    return None
+
+
+def _quarter_from_month_day(month: str, day: int) -> int | None:
+    if month.startswith("mar") and day == 31:
+        return 1
+    if month.startswith("jun") and day == 30:
+        return 2
+    if month.startswith("sep") and day == 30:
+        return 3
     return None
 
 

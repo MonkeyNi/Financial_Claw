@@ -96,7 +96,7 @@ def discover_company_pdfs(
         return []
 
     pdf_paths = sorted(
-        (p for p in fs_dir.glob("*.pdf") if p.is_file()),
+        (p for p in fs_dir.iterdir() if p.is_file() and p.suffix.lower() == ".pdf"),
         key=lambda p: p.name.lower(),
     )
     out: list[ReportFile] = []
