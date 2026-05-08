@@ -57,20 +57,33 @@ class StatementRow:
 
 
 def merge_workbooks(excel_1: Path, excel_2: Path, output_path: Path) -> Path:
-    wb1 = load_workbook(excel_1, data_only=True)
-    wb2 = load_workbook(excel_2, data_only=True)
-    _validate_workbook(wb1, excel_1)
-    _validate_workbook(wb2, excel_2)
+    return merge_workbook_sequence([excel_1, excel_2], output_path)
+
+
+def merge_workbook_sequence(workbook_paths: list[Path], output_path: Path) -> Path:
+    if not workbook_paths:
+        raise ValueError("At least one workbook is required for merge.")
 
     out_wb = Workbook()
     out_wb.remove(out_wb.active)
 
+    parsed_workbooks = sorted(
+        (_parse_workbook(path) for path in workbook_paths),
+        key=lambda item: (item[0], str(item[1]).lower()),
+    )
+    logger.info(
+        "Merging {} workbooks in period order: {}",
+        len(parsed_workbooks),
+        [str(path) for _, path, _ in parsed_workbooks],
+    )
+
     for sheet_name in EXPECTED_SHEETS:
-        logger.info("Merging sheet: {}", sheet_name)
-        left = parse_statement_sheet(wb1[sheet_name])
-        right = parse_statement_sheet(wb2[sheet_name])
-        merged_rows = merge_statement_rows(left.rows, right.rows)
-        periods = _merge_periods(left, right)
+        parsed_sheets = [workbook[sheet_name] for _, _, workbook in parsed_workbooks]
+        merged_rows = list(parsed_sheets[0].rows)
+        for parsed in parsed_sheets[1:]:
+            logger.info("Merging sheet: {} <- {}", sheet_name, parsed.title)
+            merged_rows = merge_statement_rows(merged_rows, parsed.rows)
+        periods = _merge_all_periods(parsed_sheets)
         write_merged_sheet(out_wb, sheet_name, merged_rows, periods)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -79,8 +92,32 @@ def merge_workbooks(excel_1: Path, excel_2: Path, output_path: Path) -> Path:
     return output_path
 
 
+def validate_extracted_workbook(path: Path) -> None:
+    wb = load_workbook(path, data_only=True)
+    _validate_workbook(wb, path)
+    for sheet_name in EXPECTED_SHEETS:
+        parse_statement_sheet(wb[sheet_name])
+
+
+def workbook_latest_period_sort_key(path: Path) -> tuple[int, int]:
+    return _parse_workbook(path)[0]
+
+
+def _parse_workbook(path: Path) -> tuple[tuple[int, int], Path, dict[str, ParsedSheet]]:
+    wb = load_workbook(path, data_only=True)
+    _validate_workbook(wb, path)
+    parsed = {sheet_name: parse_statement_sheet(wb[sheet_name]) for sheet_name in EXPECTED_SHEETS}
+    periods = [period for sheet in parsed.values() for period in sheet.periods.values()]
+    if not periods:
+        raise ValueError(f"{path} does not contain any parseable annual or quarterly period columns.")
+    latest = max(period.sort_key for period in periods)
+    return latest, path, parsed
+
+
 def _validate_workbook(wb, path: Path) -> None:
     names = wb.sheetnames
+    if names == ["NoStatements"]:
+        raise ValueError(f"{path} did not contain extracted financial statement tables; please check candidate detection or OCR output.")
     if names != EXPECTED_SHEETS:
         raise ValueError(f"{path} must contain exactly these sheets in order: {EXPECTED_SHEETS}; got {names}")
 
@@ -233,8 +270,12 @@ def _find_conservative_match(
 
 
 def _merge_periods(left: ParsedSheet, right: ParsedSheet) -> list[Period]:
+    return _merge_all_periods([left, right])
+
+
+def _merge_all_periods(parsed_sheets: list[ParsedSheet]) -> list[Period]:
     by_label: dict[str, Period] = {}
-    for parsed in (left, right):
+    for parsed in parsed_sheets:
         for period in parsed.periods.values():
             by_label[period.label] = period
     annual = sorted((p for p in by_label.values() if p.kind == "annual"), key=lambda p: p.sort_key)

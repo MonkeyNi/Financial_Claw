@@ -6,13 +6,14 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from time import perf_counter
+from time import perf_counter, sleep
 from typing import Iterable, Literal
 
 from loguru import logger
 
 try:
     from financial_claw.core.models import ReportFile
+    from financial_claw.core.workbook_merge import merge_workbook_sequence
     from financial_claw.extractor.cli import PdfExtractionConfig, PdfExtractionSummary, run_pdf_extraction
 except ModuleNotFoundError:  # allows direct script execution from repo root
     import sys
@@ -21,6 +22,7 @@ except ModuleNotFoundError:  # allows direct script execution from repo root
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
     from financial_claw.core.models import ReportFile  # type: ignore[no-redef]
+    from financial_claw.core.workbook_merge import merge_workbook_sequence  # type: ignore[no-redef]
     from financial_claw.extractor.cli import (  # type: ignore[no-redef]
         PdfExtractionConfig,
         PdfExtractionSummary,
@@ -203,6 +205,7 @@ def run_company_init(
     ocr_language: str = "en",
     render_dpi: int = 220,
     max_continuation_pages: int = 3,
+    max_retries: int = 3,
 ) -> CompanyRunSummary:
     if plan.mode != "init":
         raise ValueError(f"run_company_init requires an init plan, got {plan.mode!r}")
@@ -211,7 +214,7 @@ def run_company_init(
     worker_count = max(1, min(int(max_workers), 8, len(plan.inputs) or 1))
     output_root = Path(output_dir) if output_dir is not None else Path(plan.final_excel_dir)
     logger.info(
-        "[company-init] company={} pdfs={} max_workers={} output_dir={} ocr_provider={} mineru_mode={} debug={}",
+        "[company-init] company={} pdfs={} max_workers={} output_dir={} ocr_provider={} mineru_mode={} debug={} max_retries={}",
         plan.company,
         len(plan.inputs),
         worker_count,
@@ -219,6 +222,7 @@ def run_company_init(
         ocr_provider,
         mineru_mode,
         debug,
+        max_retries,
     )
 
     succeeded: list[PdfExtractionSummary] = []
@@ -229,30 +233,70 @@ def run_company_init(
         return CompanyRunSummary(plan.company, plan.mode, succeeded, failed, elapsed_s)
 
     def run_one(index: int, report: ReportFile) -> PdfExtractionSummary:
-        logger.info("[pdf-start] {}/{} company={} file={}", index, len(plan.inputs), plan.company, report.file_name)
-        pdf_start = perf_counter()
-        summary = run_pdf_extraction(
-            PdfExtractionConfig(
-                pdf_path=Path(report.pdf_path),
-                output_dir=output_root,
-                company=plan.company,
-                debug=debug,
-                max_continuation_pages=max_continuation_pages,
-                ocr_provider=ocr_provider,
-                mineru_mode=mineru_mode,
-                ocr_language=ocr_language,
-                render_dpi=render_dpi,
+        retries = max(0, int(max_retries))
+        max_attempts = retries + 1
+        last_error: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            attempt_start = perf_counter()
+            logger.info(
+                "[pdf-start] {}/{} company={} file={} attempt={}/{}",
+                index,
+                len(plan.inputs),
+                plan.company,
+                report.file_name,
+                attempt,
+                max_attempts,
             )
-        )
-        logger.info(
-            "[pdf-done] {}/{} file={} elapsed={:.2f}s output={}",
-            index,
-            len(plan.inputs),
-            report.file_name,
-            perf_counter() - pdf_start,
-            summary.output_path,
-        )
-        return summary
+            try:
+                summary = run_pdf_extraction(
+                    PdfExtractionConfig(
+                        pdf_path=Path(report.pdf_path),
+                        output_dir=output_root,
+                        company=plan.company,
+                        debug=debug,
+                        max_continuation_pages=max_continuation_pages,
+                        ocr_provider=ocr_provider,
+                        mineru_mode=mineru_mode,
+                        ocr_language=ocr_language,
+                        render_dpi=render_dpi,
+                    )
+                )
+                logger.info(
+                    "[pdf-done] {}/{} file={} attempt={}/{} elapsed={:.2f}s output={}",
+                    index,
+                    len(plan.inputs),
+                    report.file_name,
+                    attempt,
+                    max_attempts,
+                    perf_counter() - attempt_start,
+                    summary.output_path,
+                )
+                return summary
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                logger.warning(
+                    "[pdf-attempt-failed] {}/{} file={} attempt={}/{} elapsed={:.2f}s error={}",
+                    index,
+                    len(plan.inputs),
+                    report.file_name,
+                    attempt,
+                    max_attempts,
+                    perf_counter() - attempt_start,
+                    exc,
+                )
+                if attempt < max_attempts:
+                    retry_delay_s = min(2 ** (attempt - 1), 10)
+                    logger.info(
+                        "[pdf-retry] file={} next_attempt={}/{} delay={}s",
+                        report.file_name,
+                        attempt + 1,
+                        max_attempts,
+                        retry_delay_s,
+                    )
+                    sleep(retry_delay_s)
+        if last_error is None:
+            raise RuntimeError(f"PDF extraction failed without an error: {report.file_name}")
+        raise last_error
 
     with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="financial-claw-init") as executor:
         future_to_report = {
@@ -279,6 +323,30 @@ def run_company_init(
         for item in failed:
             logger.error("[company-init-failure] file={} error={}", item.report.file_name, item.error)
     return CompanyRunSummary(plan.company, plan.mode, succeeded, failed, elapsed_s)
+
+
+def final_company_workbook_path(company: str, *, root: str | Path = "companies") -> Path:
+    return company_dir(company, root=root) / f"{company}_financial_statements_final.xlsx"
+
+
+def merge_company_init_outputs(summary: CompanyRunSummary, *, root: str | Path = "companies") -> Path | None:
+    if summary.failed:
+        raise ValueError("Company init has failed PDF extractions; final merge is skipped.")
+    workbook_paths = [item.output_path for item in summary.succeeded]
+    if not workbook_paths:
+        logger.warning("[company-merge-skip] company={} no extracted workbooks to merge", summary.company)
+        return None
+
+    output_path = final_company_workbook_path(summary.company, root=root)
+    logger.info(
+        "[company-merge-start] company={} workbooks={} output={}",
+        summary.company,
+        len(workbook_paths),
+        output_path,
+    )
+    merged_path = merge_workbook_sequence(workbook_paths, output_path)
+    logger.info("[company-merge-done] company={} output={}", summary.company, merged_path)
+    return merged_path
 
 
 def plan_update(
@@ -332,6 +400,12 @@ if __name__ == "__main__":
     parser.add_argument("--ocr-language", default="en")
     parser.add_argument("--render-dpi", type=int, default=220)
     parser.add_argument("--max-continuation-pages", type=int, default=3)
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=3,
+        help="Maximum retries per failed PDF extraction. Default: 3 retries after the first attempt.",
+    )
     parser.add_argument("--plan-only", action="store_true", help="Only print the ingest plan; do not extract PDFs.")
     args = parser.parse_args()
 
@@ -356,6 +430,12 @@ if __name__ == "__main__":
             ocr_language=args.ocr_language,
             render_dpi=args.render_dpi,
             max_continuation_pages=args.max_continuation_pages,
+            max_retries=args.max_retries,
         )
         if summary.failed:
             raise SystemExit(1)
+        try:
+            merge_company_init_outputs(summary, root=cwd_root)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("[company-merge-failed] company={} error={}", summary.company, exc)
+            raise SystemExit(1) from exc

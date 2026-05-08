@@ -38,11 +38,16 @@ def _normalize_text(text: str) -> str:
 
 
 def _is_notes_page(text: str) -> bool:
-    head = _first_lines(text, 5).lower()
-    return (
-        "notes to the consolidated financial statements" in head
-        or "notes to the interim condensed consolidated financial statements" in head
-    )
+    lines = [line.strip().lower() for line in _normalize_text(text).splitlines() if line.strip()]
+    for line in lines[:8]:
+        if line.startswith(
+            (
+                "notes to the consolidated financial statements",
+                "notes to the interim condensed consolidated financial statements",
+            )
+        ):
+            return True
+    return False
 
 
 def _is_reference_page(text: str) -> bool:

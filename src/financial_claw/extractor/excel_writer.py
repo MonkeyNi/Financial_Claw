@@ -144,6 +144,10 @@ def _coerce_excel_cell_value(value: object, force_text: bool = False) -> object:
     if not isinstance(value, str):
         return value
 
+    raw_text = value.strip()
+    if re.fullmatch(r"[¥￦]\s*\d{1,2}", raw_text):
+        return raw_text
+
     text = _apply_cell_text_replacements(value).strip()
     if not text:
         return ""

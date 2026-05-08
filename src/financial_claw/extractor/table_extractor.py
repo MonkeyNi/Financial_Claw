@@ -70,11 +70,12 @@ def extract_candidate_tables(
             if page_number in ocr_results:
                 ocr_result = ocr_results[page_number]
                 if ocr_result.rows:
-                    page_rows = ocr_result.rows
+                    page_rows = _merge_multiline_headers(ocr_result.rows)
                     candidate.extraction_method = "mineru_ocr_fallback"
                 warnings.extend(ocr_result.warnings)
             if rows:
                 page_rows = _drop_repeated_leading_header(page_rows)
+                page_rows = _align_continuation_rows(page_rows, rows)
                 rows.append([])
                 rows.append(["continue"])
             rows.extend(page_rows)
@@ -103,10 +104,59 @@ def _count_numeric_cells(rows: list[list[str]]) -> int:
 
 
 def _drop_repeated_leading_header(rows: list[list[str]]) -> list[list[str]]:
+    first_body_idx: int | None = None
+    for idx, row in enumerate(rows[:12]):
+        if _is_continuation_body_start(row):
+            first_body_idx = idx
+            break
+    if first_body_idx is not None and first_body_idx > 0:
+        return rows[first_body_idx:]
+
     trimmed = list(rows)
     while trimmed and _is_repeated_header_row(trimmed[0]):
         trimmed.pop(0)
     return trimmed
+
+
+def _align_continuation_rows(rows: list[list[str]], previous_rows: list[list[str]]) -> list[list[str]]:
+    target_width = max((len(row) for row in previous_rows if row), default=0)
+    if target_width < 4:
+        return rows
+    aligned: list[list[str]] = []
+    for row in rows:
+        if len(row) == target_width - 1 and _looks_like_missing_notes_column(row):
+            aligned.append([row[0], ""] + row[1:])
+        else:
+            aligned.append(row)
+    return aligned
+
+
+def _looks_like_missing_notes_column(row: list[str]) -> bool:
+    if not row:
+        return False
+    if len(row) < 3:
+        return False
+    if not str(row[0] or "").strip():
+        return False
+    trailing = [str(cell or "").strip() for cell in row[1:]]
+    return all(not cell or _is_amount_token(cell) for cell in trailing)
+
+
+def _is_continuation_body_start(row: list[str]) -> bool:
+    if _is_repeated_header_row(row):
+        return False
+    if _is_continuation_entity_header_row(row):
+        return False
+    if _is_section_label_row(row):
+        return True
+    if _row_has_numeric_amount(row):
+        return True
+    text = " ".join(str(cell) for cell in row if cell).strip().lower()
+    if not text:
+        return False
+    if _looks_like_header_label(text) or _is_statement_title_text(text) or _is_unit_context_text(text):
+        return False
+    return len(text.split()) >= 2 and not _looks_like_entity_column_header([text])
 
 
 def _remove_non_table_rows(rows: list[list[str]]) -> list[list[str]]:
@@ -136,6 +186,8 @@ def _is_non_table_row(row: list[str]) -> bool:
 def _is_repeated_header_row(row: list[str]) -> bool:
     text = " ".join(str(cell) for cell in row if cell).strip().lower()
     if not text:
+        return True
+    if _is_continuation_entity_header_row(row):
         return True
     if _is_statement_title_text(text) or _is_unit_context_text(text):
         return True
@@ -170,11 +222,48 @@ def _is_continuation_column_header_row(row: list[str]) -> bool:
     text = " ".join(non_empty).lower()
     if _is_unit_context_text(text):
         return True
+    if _is_period_header_text(text):
+        return True
+    if _is_period_date_fragment_header_row(non_empty):
+        return True
     if all(_is_structural_header_cell(cell) for cell in non_empty):
         return True
     if _looks_like_entity_column_header(non_empty):
         return True
     return False
+
+
+def _is_period_date_fragment_header_row(cells: list[str]) -> bool:
+    text = re.sub(r"\s+", " ", " ".join(cells).strip().lower())
+    month = (
+        r"january|february|march|april|may|june|july|august|"
+        r"september|october|november|december"
+    )
+    if not re.search(rf"\b(?:{month})\b", text):
+        return False
+    if len(re.findall(r"\b(?:19|20)\d{2}\b", text)) < 1:
+        return False
+    allowed = re.compile(rf"^(?:{month}|\d{{1,2}},?|\d{{4}}|\(?unaudited\)?|\s)+$", re.I)
+    return all(allowed.fullmatch(cell.strip()) for cell in cells if cell.strip())
+
+
+def _is_continuation_entity_header_row(row: list[str]) -> bool:
+    non_empty = [str(cell).strip() for cell in row if str(cell).strip()]
+    if len(non_empty) != 1:
+        return False
+    text = non_empty[0]
+    low = text.lower()
+    if any(term in low for term in ("consolidated statement", "interim condensed", "annual report", "auditor")):
+        return False
+    if _is_unit_context_text(low) or _is_section_label_text(low):
+        return False
+    if _is_amount_token(text) or re.fullmatch(r"\d{4}", text):
+        return False
+    if not re.search(r"[A-Za-z]", text):
+        return False
+    return bool(
+        re.search(r"\b(inc\.?|ltd\.?|limited|corp\.?|corporation|company|holdings?|group|subsidiar(?:y|ies))\b", low)
+    )
 
 
 def _looks_like_entity_column_header(cells: list[str]) -> bool:
@@ -239,6 +328,8 @@ def _line_is_financial_table_like(line: list[tuple], page: fitz.Page) -> bool:
     low = text.lower()
     if _is_unit_context_text(low):
         return True
+    if _is_period_header_text(low):
+        return True
     return any(
         token in low
         for token in [
@@ -253,10 +344,36 @@ def _line_is_financial_table_like(line: list[tuple], page: fitz.Page) -> bool:
             "receivable",
             "equity",
             "financial position",
+            "investment",
+            "investments",
+            "disposal",
+            "acquisitions",
+            "proceeds",
             "$m",
             "note",
         ]
     )
+
+
+def _is_period_header_text(text: str) -> bool:
+    normalized = _normalize_period_header_text(text)
+    if not normalized:
+        return False
+    return bool(
+        re.search(r"\bfor each of the\b", normalized)
+        or re.search(r"\bfor the (?:three|six|nine|twelve)[-\s]month(?:s)? period", normalized)
+        or re.search(r"\bfor the year(?:s)? ended\b", normalized)
+        or re.search(r"\bperiods? ended\b", normalized)
+        or re.search(r"\bended\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\b", normalized)
+    )
+
+
+def _normalize_period_header_text(text: str) -> str:
+    normalized = re.sub(r"\s+", " ", text.strip().lower())
+    normalized = re.sub(r"\bperiodended\b", "period ended", normalized)
+    normalized = re.sub(r"\bperiodsended\b", "periods ended", normalized)
+    normalized = re.sub(r"\)(?=\d{4}\b)", ") ", normalized)
+    return normalized
 
 
 def _infer_numeric_anchors(lines: list[list[tuple]]) -> list[float]:
@@ -357,7 +474,9 @@ def _mean(values: list[float]) -> float:
 def _line_to_cells(line: list[tuple], anchors: list[float]) -> list[str]:
     words = sorted(line, key=lambda w: w[0])
     text = " ".join(str(w[4]) for w in words)
-    if _is_unit_context_text(text) or _is_statement_title_text(text):
+    if _is_unit_context_text(text) and not _has_column_header_tokens(words):
+        return [text]
+    if _is_statement_title_text(text):
         return [text]
     if not anchors:
         return [" ".join(str(w[4]) for w in words)]
@@ -376,6 +495,11 @@ def _line_to_cells(line: list[tuple], anchors: list[float]) -> list[str]:
         idx = max(0, min(idx, len(cells) - 1))
         cells[idx].append(token)
     return [" ".join(cell).strip() for cell in cells]
+
+
+def _has_column_header_tokens(words: list[tuple]) -> bool:
+    tokens = [str(word[4]).strip() for word in words if str(word[4]).strip()]
+    return any(_is_structural_header_cell(token) for token in tokens)
 
 
 def _merge_leading_label_fragments(rows: list[list[str]]) -> list[list[str]]:
@@ -444,6 +568,8 @@ def _merge_multiline_headers(rows: list[list[str]]) -> list[list[str]]:
 
 def _find_first_data_row(rows: list[list[str]]) -> int:
     for idx, row in enumerate(rows):
+        if _is_continuation_column_header_row(row):
+            continue
         label = (row[0] if row else "").lower()
         numeric_cells = sum(1 for cell in row[1:] if cell and _is_amount_token(str(cell)))
         if numeric_cells >= 2 and not _looks_like_header_label(label):
@@ -454,6 +580,7 @@ def _find_first_data_row(rows: list[list[str]]) -> int:
 def _looks_like_header_label(label: str) -> bool:
     header_terms = [
         "for the year",
+        "for the years",
         "for each",
         "as at",
         "as of",
@@ -487,6 +614,8 @@ def _merge_header_band(rows: list[list[str]]) -> list[list[str]]:
         else:
             leading_rows.append(row)
 
+    column_rows = _normalize_period_header_rows(column_rows)
+
     if not column_rows:
         return leading_rows + section_rows
     if any(_column_row_has_entity_label(row) for row in column_rows):
@@ -499,13 +628,111 @@ def _merge_header_band(rows: list[list[str]]) -> list[list[str]]:
         for idx, cell in enumerate(padded):
             if not cell:
                 continue
-            merged[idx] = f"{merged[idx]}\n{cell}" if merged[idx] else cell
+            merged[idx] = _merge_header_cell(merged[idx], cell)
     return leading_rows + [merged] + section_rows
+
+
+def _normalize_period_header_rows(rows: list[list[str]]) -> list[list[str]]:
+    rows = _move_period_header_out_of_notes_column(rows)
+    normalized: list[list[str]] = []
+    for row in rows:
+        normalized.append(_normalize_period_header_row(row))
+    return normalized
+
+
+def _move_period_header_out_of_notes_column(rows: list[list[str]]) -> list[list[str]]:
+    normalized = [list(row) for row in rows]
+    for row_idx in range(len(normalized) - 1):
+        current = normalized[row_idx]
+        below = normalized[row_idx + 1]
+        width = max(len(current), len(below))
+        if len(current) < width:
+            current.extend([""] * (width - len(current)))
+        if len(below) < width:
+            below.extend([""] * (width - len(below)))
+        for col_idx in range(1, width - 1):
+            header = str(current[col_idx] or "").strip()
+            below_cell = str(below[col_idx] or "").strip().lower()
+            if not _is_period_header_text(header) or below_cell not in {"note", "notes"}:
+                continue
+            period_cols = [
+                idx
+                for idx in range(col_idx + 1, width)
+                if _is_year_header_cell(str(below[idx] or "").strip()) or _is_date_header_cell(str(below[idx] or "").strip())
+            ]
+            if not period_cols:
+                continue
+            current[col_idx] = ""
+            for idx in period_cols:
+                if not str(current[idx] or "").strip():
+                    current[idx] = header
+    return normalized
+
+
+def _normalize_period_header_row(row: list[str]) -> list[str]:
+    cells = list(row)
+    idx = 0
+    while idx + 1 < len(cells):
+        current = str(cells[idx] or "").strip()
+        next_cell = str(cells[idx + 1] or "").strip()
+        if _is_period_header_text(current.lower()) and not next_cell:
+            cells[idx + 1] = current
+            idx += 2
+            continue
+        if current.lower() in {"(unaudited)", "unaudited"} and not next_cell:
+            cells[idx + 1] = current
+            idx += 2
+            continue
+        combined = re.sub(r"\s+", " ", f"{current} {next_cell}".strip())
+        if _is_split_period_group_header(current, next_cell, combined) or _is_split_period_date_header(current, next_cell, combined):
+            cells[idx] = combined
+            cells[idx + 1] = combined
+            idx += 2
+            continue
+        idx += 1
+    return cells
+
+
+def _is_split_period_group_header(current: str, next_cell: str, combined: str) -> bool:
+    if not current or not next_cell:
+        return False
+    return bool(
+        re.fullmatch(
+            r"for the (?:three|six|nine|twelve)[-\s]month(?:s)? period",
+            combined.strip().lower(),
+        )
+    )
+
+
+def _is_split_period_date_header(current: str, next_cell: str, combined: str) -> bool:
+    if not current or not next_cell:
+        return False
+    month = (
+        r"january|february|march|april|may|june|july|august|"
+        r"september|october|november|december"
+    )
+    return bool(re.fullmatch(rf"ended (?:{month}) \d{{1,2}},?", combined.strip().lower()))
+
+
+def _merge_header_cell(existing: str, cell: str) -> str:
+    if not existing:
+        return _clean_period_header_cell(cell)
+    combined = f"{existing} {cell}".strip()
+    if _is_date_header_cell(combined):
+        return re.sub(r"\s+", " ", combined)
+    return f"{existing}\n{_clean_period_header_cell(cell)}"
+
+
+def _clean_period_header_cell(text: str) -> str:
+    cleaned = re.sub(r"\bperiodended\b", "period ended", str(text))
+    cleaned = re.sub(r"\bperiodsended\b", "periods ended", cleaned)
+    cleaned = re.sub(r"\)(?=\d{4}\b)", ") ", cleaned)
+    return cleaned
 
 
 def _row_is_statement_context(row: list[str]) -> bool:
     text = " ".join(str(cell) for cell in row if cell).lower()
-    return text.startswith(("as of ", "as at ", "for each ", "for the year ", "for the period "))
+    return text.startswith(("as of ", "as at ", "for each ", "for the year ", "for the years ", "for the period "))
 
 
 def _column_row_has_entity_label(row: list[str]) -> bool:
@@ -522,13 +749,34 @@ def _column_row_has_entity_label(row: list[str]) -> bool:
 
 def _is_structural_header_cell(text: str) -> bool:
     normalized = text.strip().lower()
-    if normalized in {"note", "notes", "$m", "$000", "$", "m"}:
+    if normalized in {"note", "notes", "$m", "$000", "$", "m", "(unaudited)", "unaudited"}:
         return True
-    if re.fullmatch(r"\d{4}", normalized):
+    if _is_date_header_cell(normalized):
+        return True
+    if _is_period_header_text(normalized):
+        return True
+    if _is_year_header_cell(normalized):
         return True
     if re.fullmatch(r"(?:19|20)\d{2}\s*[\n ]+\$?m", normalized):
         return True
     return False
+
+
+def _is_year_header_cell(text: str) -> bool:
+    return bool(re.fullmatch(r"(?:19|20)\d{2}", text.strip().lower()))
+
+
+def _is_date_header_cell(text: str) -> bool:
+    normalized = re.sub(r"\s+", " ", text.strip().lower())
+    month = (
+        r"january|february|march|april|may|june|july|august|"
+        r"september|october|november|december"
+    )
+    return bool(
+        re.fullmatch(rf"(?:{month})\s+\d{{1,2}},?", normalized)
+        or re.fullmatch(rf"(?:{month})\s+\d{{1,2}},?\s+(?:19|20)\d{{2}}", normalized)
+        or re.fullmatch(rf"(?:{month})\s+\d{{1,2}},?\s+(?:19|20)\d{{2}}\s*\(?unaudited\)?", normalized)
+    )
 
 
 def _is_section_label_row(row: list[str]) -> bool:
@@ -576,6 +824,8 @@ def _is_label_only_continuation(row: list[str]) -> bool:
         return False
     label = row[0].strip().lower()
     if _is_unit_context_text(label):
+        return False
+    if _looks_like_header_label(label):
         return False
     if label.endswith(":"):
         return False
