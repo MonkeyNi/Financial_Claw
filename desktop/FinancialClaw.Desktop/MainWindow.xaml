@@ -1,0 +1,114 @@
+<Window x:Class="FinancialClaw.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        Title="Financial Claw"
+        Icon="Assets/financial-claw.ico"
+        Width="820"
+        MinWidth="640"
+        SizeToContent="Height"
+        Background="#F5F7FA">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition x:Name="RunHistoryGapRow" Height="0"/>
+            <RowDefinition x:Name="RunHistoryRow" Height="0"/>
+        </Grid.RowDefinitions>
+
+        <DockPanel Grid.Row="0" LastChildFill="True">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <ui:Button x:Name="RefreshButton" Content="Refresh" Appearance="Secondary" Style="{StaticResource TopCommandButtonStyle}" Click="RefreshButton_Click"/>
+                <ui:Button x:Name="UpdateAllButton" Content="Update All" Appearance="Primary" Style="{StaticResource TopCommandButtonStyle}" Click="UpdateAllButton_Click"/>
+            </StackPanel>
+            <StackPanel>
+                <TextBlock Text="Financial Claw" FontSize="24" FontWeight="SemiBold"/>
+                <TextBlock Text="Extract, normalize, and consolidate company financial statements for analysis"
+                           Foreground="{StaticResource MutedTextBrush}"
+                           Margin="0,4,0,0"/>
+            </StackPanel>
+        </DockPanel>
+
+        <Border Grid.Row="1" Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,18,0,14">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="Analysis Workspace:" FontWeight="SemiBold" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                <TextBlock x:Name="WorkspaceText" Grid.Column="1" TextWrapping="Wrap" Foreground="#27364A" VerticalAlignment="Center"/>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <ui:Button x:Name="AddCompanyButton"
+                               Content="Add Company"
+                               Appearance="Secondary"
+                               Style="{StaticResource TopCommandButtonStyle}"
+                               Click="AddCompanyButton_Click"/>
+                    <ui:Button x:Name="OpenWorkspaceButton"
+                               Content="Open Workspace"
+                               Appearance="Secondary"
+                               Style="{StaticResource TopCommandButtonStyle}"
+                               Click="OpenWorkspaceButton_Click"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="2" Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8">
+            <DataGrid x:Name="CompanyGrid"
+                      AutoGenerateColumns="False"
+                      CanUserAddRows="False"
+                      CanUserDeleteRows="False"
+                      IsReadOnly="True"
+                      MaxHeight="436"
+                      HeadersVisibility="Column"
+                      GridLinesVisibility="Horizontal"
+                      RowHeaderWidth="0"
+                      BorderThickness="0"
+                      ScrollViewer.VerticalScrollBarVisibility="Auto"
+                      ItemsSource="{Binding Companies}">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Company" Binding="{Binding Name}" Width="*" HeaderStyle="{StaticResource LeftHeaderStyle}" ElementStyle="{StaticResource LeftCellTextStyle}"/>
+                    <DataGridTextColumn Header="Source Reports" Binding="{Binding SourceReports}" Width="140" HeaderStyle="{StaticResource CenterHeaderStyle}" ElementStyle="{StaticResource CenterCellTextStyle}"/>
+                    <DataGridTextColumn Header="Processed" Binding="{Binding ProcessedReports}" Width="120" HeaderStyle="{StaticResource CenterHeaderStyle}" ElementStyle="{StaticResource CenterCellTextStyle}"/>
+                    <DataGridTextColumn Header="Pending" Binding="{Binding PendingReports}" Width="110" HeaderStyle="{StaticResource CenterHeaderStyle}" ElementStyle="{StaticResource CenterCellTextStyle}"/>
+                    <DataGridTemplateColumn Header="Action" Width="110" HeaderStyle="{StaticResource CenterHeaderStyle}">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <Grid HorizontalAlignment="Center">
+                                    <ui:Button Content="Update"
+                                               Appearance="Secondary"
+                                               Style="{StaticResource CompactCommandButtonStyle}"
+                                               Click="UpdateCompanyButton_Click"
+                                               Tag="{Binding}"/>
+                                </Grid>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+        </Border>
+
+        <Border x:Name="RunHistoryPanel" Grid.Row="4" Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Visibility="Collapsed">
+                <DataGrid x:Name="ProcessingGrid"
+                          AutoGenerateColumns="False"
+                          CanUserAddRows="False"
+                          CanUserDeleteRows="False"
+                          IsReadOnly="True"
+                          MaxHeight="436"
+                          HeadersVisibility="Column"
+                          GridLinesVisibility="Horizontal"
+                          RowHeaderWidth="0"
+                          BorderThickness="0"
+                          ScrollViewer.VerticalScrollBarVisibility="Auto"
+                          ItemsSource="{Binding RunSummaries}">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Time" Binding="{Binding Time}" Width="110" HeaderStyle="{StaticResource CenterHeaderStyle}" ElementStyle="{StaticResource CenterCellTextStyle}"/>
+                        <DataGridTextColumn Header="Company" Binding="{Binding Company}" Width="160" HeaderStyle="{StaticResource LeftHeaderStyle}" ElementStyle="{StaticResource LeftCellTextStyle}"/>
+                        <DataGridTextColumn Header="Progress" Binding="{Binding Progress}" Width="120" HeaderStyle="{StaticResource CenterHeaderStyle}" ElementStyle="{StaticResource CenterCellTextStyle}"/>
+                        <DataGridTextColumn Header="Result" Binding="{Binding Result}" Width="*" HeaderStyle="{StaticResource LeftHeaderStyle}" ElementStyle="{StaticResource LeftCellTextStyle}"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+        </Border>
+    </Grid>
+</Window>

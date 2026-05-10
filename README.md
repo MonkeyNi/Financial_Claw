@@ -76,6 +76,41 @@ Run all companies from the repository root:
 bash tests/run_all_company_init.sh
 ```
 
+### Windows Desktop UI
+
+A simple WPF desktop shell is available at `desktop/FinancialClaw.Desktop/`.
+It is intended for non-technical Windows users:
+
+- scans the repository `companies/` folder
+- runs the unified company update command for each company
+- shows per-company progress
+- shows the save folder
+- keeps detailed run output in the details panel
+
+The desktop shell uses WPF with the `WPF-UI` component package for modern Windows-style controls.
+
+Build/run from a machine with the .NET 6 SDK installed:
+
+```powershell
+dotnet run --project desktop\FinancialClaw.Desktop\FinancialClaw.Desktop.csproj
+```
+
+Or use the Windows launcher from the repository root:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\start_financial_claw.ps1
+```
+
+For double-click launch without a console window, use `start_financial_claw.vbs`.
+`start_financial_claw.bat` is kept for command-line troubleshooting.
+
+The UI calls the existing Python pipeline, so Python dependencies must still be installed:
+
+```powershell
+pip install -r requirements.txt
+pip install -e .
+```
+
 Company config shape:
 
 ```json

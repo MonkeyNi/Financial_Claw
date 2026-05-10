@@ -1,0 +1,70 @@
+{
+  "format": 1,
+  "restore": {
+    "D:\\Project\\Financial_Analysis\\desktop\\FinancialClaw.Desktop\\FinancialClaw.Desktop.csproj": {}
+  },
+  "projects": {
+    "D:\\Project\\Financial_Analysis\\desktop\\FinancialClaw.Desktop\\FinancialClaw.Desktop.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "D:\\Project\\Financial_Analysis\\desktop\\FinancialClaw.Desktop\\FinancialClaw.Desktop.csproj",
+        "projectName": "FinancialClaw.Desktop",
+        "projectPath": "D:\\Project\\Financial_Analysis\\desktop\\FinancialClaw.Desktop\\FinancialClaw.Desktop.csproj",
+        "packagesPath": "C:\\Users\\niziy\\.nuget\\packages\\",
+        "outputPath": "D:\\Project\\Financial_Analysis\\desktop\\FinancialClaw.Desktop\\obj\\",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "C:\\Users\\niziy\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net6.0-windows"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net6.0-windows7.0": {
+            "targetAlias": "net6.0-windows",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        }
+      },
+      "frameworks": {
+        "net6.0-windows7.0": {
+          "targetAlias": "net6.0-windows",
+          "dependencies": {
+            "WPF-UI": {
+              "target": "Package",
+              "version": "[3.0.5, )"
+            }
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            },
+            "Microsoft.WindowsDesktop.App.WPF": {
+              "privateAssets": "none"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\6.0.428\\RuntimeIdentifierGraph.json"
+        }
+      }
+    }
+  }
+}
