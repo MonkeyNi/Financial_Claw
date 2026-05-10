@@ -288,6 +288,18 @@ class MinerUOCRProvider:
         return rows
 
 
+def validate_mineru_configuration(*, mode: str) -> None:
+    if mode not in {"precision", "agent"}:
+        raise ValueError(f"Unsupported MinerU mode: {mode}")
+    if mode != "precision":
+        return
+
+    from financial_claw.ocr.mineru.mineru_api import load_mineru_api_token  # type: ignore
+
+    if not load_mineru_api_token(_mineru_package_dir()):
+        raise RuntimeError("MINERU_API_TOKEN is required for precision mode.")
+
+
 def _mineru_package_dir() -> Path:
     return Path(__file__).resolve().parents[1] / "ocr" / "mineru"
 

@@ -13,7 +13,7 @@ from loguru import logger
 from .excel_writer import write_workbook
 from .metadata import extract_metadata, infer_company_from_path
 from .pdf_profile import extract_page_text_debug, load_page_profiles
-from .providers import MinerUOCRProvider
+from .providers import MinerUOCRProvider, validate_mineru_configuration
 from .statement_locator import locate_statement_candidates
 from .table_extractor import extract_candidate_tables
 from .models import ExtractionResult
@@ -74,12 +74,18 @@ def main() -> int:
     return 0
 
 
+def validate_pdf_extraction_config(config: PdfExtractionConfig) -> None:
+    if config.ocr_provider == "mineru":
+        validate_mineru_configuration(mode=config.mineru_mode)
+
+
 def run_pdf_extraction(config: PdfExtractionConfig) -> PdfExtractionSummary:
     run_start = perf_counter()
     pdf_path = config.pdf_path.resolve()
     output_root = config.output_dir.resolve()
     if not pdf_path.exists():
         raise FileNotFoundError(pdf_path)
+    validate_pdf_extraction_config(config)
 
     logger.info("Starting extraction")
     logger.info("PDF: {}", pdf_path)

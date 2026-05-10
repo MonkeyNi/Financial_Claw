@@ -15,6 +15,7 @@ try:
     from financial_claw.core.models import ReportFile
     from financial_claw.core.workbook_merge import merge_workbook_sequence
     from financial_claw.extractor.cli import PdfExtractionConfig, PdfExtractionSummary, run_pdf_extraction
+    from financial_claw.extractor.providers import validate_mineru_configuration
 except ModuleNotFoundError:  # allows direct script execution from repo root
     import sys
 
@@ -28,6 +29,7 @@ except ModuleNotFoundError:  # allows direct script execution from repo root
         PdfExtractionSummary,
         run_pdf_extraction,
     )
+    from financial_claw.extractor.providers import validate_mineru_configuration  # type: ignore[no-redef]
 
 
 def select_input_files(
@@ -209,6 +211,8 @@ def run_company_init(
 ) -> CompanyRunSummary:
     if plan.mode != "init":
         raise ValueError(f"run_company_init requires an init plan, got {plan.mode!r}")
+    if ocr_provider == "mineru":
+        validate_mineru_configuration(mode=mineru_mode)
 
     run_start = perf_counter()
     worker_count = max(1, min(int(max_workers), 8, len(plan.inputs) or 1))

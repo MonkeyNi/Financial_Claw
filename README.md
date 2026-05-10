@@ -1,130 +1,116 @@
 # Financial Claw
 
-Extract consolidated financial statements from annual and interim PDF disclosures, normalize numbers to millions, validate roll-ups where possible, and emit three audited Excel artefacts per issuer.
+Pipeline for extracting consolidated financial statements from issuer PDFs (annual and interim), emitting structured Excel workbooks with traceability and optional OCR (MinerU) and LLM-sidecar tooling.
 
-The current algorithm package lives under `src/financial_claw/`:
+---
 
-- `extractor/`: PDF profiling, statement page location, coordinate table extraction, OCR fallback wiring, and Excel output.
-- `pipeline/`: company PDF discovery and incremental ingest planning.
-- `ocr/mineru/`: MinerU API helpers and markdown/HTML-table conversion.
-- `llm/minimax/`: MiniMax image table extraction helpers for future model-based fallback.
-- `core/`: shared config, cache, normalization, validation, warnings, and merge helpers.
+## Scope
 
-## Expected layout
+| Concern | Behavior |
+|--------|----------|
+| Input | Disclosure PDFs under per-company `Financial_Statements/` |
+| Primary output | Statement sheets (`Balance Sheet`, `Income Statement`, `Cash Flow Statement`) plus per-PDF extraction records |
+| Merge | Sequence of extracted workbooks merged into a single rolling workbook with aligned periods |
+
+---
+
+## Environment
+
+**Runtime**
+
+- Python ≥ 3.11
+- Install: `pip install -r requirements.txt` and `pip install -e .`
+- Core PDF stack: PyMuPDF (text geometry, page rasterization)
+
+**External services (optional)**
+
+- MinerU: API token for precision OCR; see `src/financial_claw/ocr/mineru/.env.example` (`MINERU_API_TOKEN`, …)
+- LLM toggles: root `.env.example` — `ENABLE_LLM_TABLE_REPAIR`, `ENABLE_LLM_LINEITEM_MATCH`, `OPENAI_*`
+- MiniMax helpers: `src/financial_claw/llm/minimax/.env.example`
+
+**Local execution without editable install**
+
+```bash
+PYTHONPATH=src python -m financial_claw.extractor.cli --help
+```
+
+---
+
+## Capabilities
+
+| Capability | Role |
+|------------|------|
+| Company ingest | Discover PDFs, SHA-256 manifests, parallel extraction (≤ 8 workers), merge successful runs into company final workbook |
+| Incremental update (target) | Existing summary workbook + new PDFs → extract each PDF → merge into master in chronological column order |
+| Single-PDF CLI | Full locate → extract → Excel for one file (`--debug`, `--ocr-provider mineru`, …) |
+| Workbook merge | Union two or more compliant workbooks on shared sheet names and period semantics |
+
+### Company ingest
+
+- **Inputs:** `companies/<Company>/Financial_Statements/*.pdf`
+- **Outputs:** `companies/<Company>/final_excel/excel/*_statements.xlsx`, debug under `final_excel/debug/`; manifest `final_excel/.processed.json`
+- **Final merge (init success):** `companies/<Company>/<Company>_financial_statements_final.xlsx`
+
+```bash
+python -m financial_claw.pipeline.ingest POSCO init
+python -m financial_claw.pipeline.ingest POSCO init --plan-only
+python -m financial_claw.pipeline.ingest POSCO update
+```
+
+### Single-PDF extraction
+
+- Default output root: `outputs/` (overridden when invoked from ingest)
+
+```bash
+python -m financial_claw.extractor.cli --pdf "companies/GOODMAN/Financial_Statements/example.pdf" --debug
+python -m financial_claw.extractor.cli --pdf "companies/POSCO/Financial_Statements/example.pdf" \
+  --debug --ocr-provider mineru --mineru-mode precision --ocr-language en
+```
+
+### Workbook merge
+
+- **Constraint:** Each workbook must contain exactly these sheets, in order: `Balance Sheet`, `Income Statement`, `Cash Flow Statement`
+
+```bash
+python -m financial_claw.core.workbook_merge \
+  path/to/first_statements.xlsx \
+  path/to/second_statements.xlsx \
+  -o path/to/merged.xlsx
+```
+
+---
+
+## Repository layout (`src/financial_claw/`)
+
+| Path | Responsibility |
+|------|------------------|
+| `extractor/` | PDF profiling, statement localization, table extraction, Excel writer |
+| `pipeline/` | Discovery, ingest planning, parallel init orchestration |
+| `ocr/mineru/` | MinerU client, markdown/HTML table conversion |
+| `llm/minimax/` | MiniMax API utilities for image/table experiments |
+| `core/` | Normalization, validation, workbook merge, caches |
+
+---
+
+## Typical workspace tree
 
 ```text
 companies/
   POSCO/
     Financial_Statements/
       *.pdf
+    POSCO_financial_statements_final.xlsx
     final_excel/
-      CompanyName_financial_statements_final.xlsx
-      CompanyName_source_tracking.xlsx
-      CompanyName_extraction_warnings.xlsx
-      .cache/
+      excel/
+        *_statements.xlsx
       .processed.json
 ```
 
-## Environment setup (WSL + conda)
+---
 
-```bash
-conda activate base
-python -m pip install -r requirements.txt
-python -m pip install -e .
-```
+## Data format (merged outputs)
 
-### System dependencies
-
-- [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) for scanned tables
-- [Poppler](https://poppler.freedesktop.org/) for `pdf2image`
-- Java or Ghostscript (pick one) if you enable Camelot's lattice mode on tricky PDFs
-
-Copy `.env.example` to `.env` and export the variables (or use `direnv`).
-
-## CLI quickstart
-
-Commands below assume the package has been installed with `python -m pip install
--e .`. For one-off runs without installing, prefix commands with
-`PYTHONPATH=src`, for example:
-
-```bash
-PYTHONPATH=src python -m financial_claw.extractor.cli --help
-```
-
-Run an initial company ingest. This scans every PDF under
-`companies/POSCO/Financial_Statements/`, computes file hashes, and extracts each
-PDF in parallel with up to 8 workers. MinerU OCR fallback is enabled by default;
-only low numeric-density candidate pages are rendered and submitted to MinerU.
-By default, company init writes outputs under
-`companies/POSCO/final_excel/`.
-
-```bash
-python -m financial_claw.pipeline.ingest POSCO init
-```
-
-Preview the initial ingest plan without extracting PDFs.
-
-```bash
-python -m financial_claw.pipeline.ingest POSCO init --plan-only
-```
-
-Plan an incremental company ingest. If `companies/POSCO/final_excel/` has no
-Excel outputs yet, it behaves like `init`; otherwise it uses `.processed.json`
-to report only new or explicitly selected PDFs.
-
-```bash
-python -m financial_claw.pipeline.ingest POSCO update
-```
-
-Extract one PDF using embedded PDF text and coordinate-based table parsing. The
-`--debug` flag writes page text, statement candidates, and metadata alongside
-the Excel workbook.
-
-```bash
-python -m financial_claw.extractor.cli --pdf "companies/GOODMAN/Financial_Statements/2 Goodman 2025 Annual Report.pdf" --debug
-```
-
-Extract one PDF with MinerU OCR fallback enabled. This keeps the normal embedded
-text path first, then renders low numeric-density candidate pages and sends only
-those pages to MinerU precision mode.
-
-```bash
-python -m financial_claw.extractor.cli --pdf "companies/POSCO/Financial_Statements/POSCO Holdings_consolidated_FY25 1Q.pdf" --debug --ocr-provider mineru --mineru-mode precision --ocr-language en
-```
-
-Single-PDF extraction writes Excel and debug outputs under `outputs/` by default.
-
-Merge a newly extracted workbook into an existing workbook. The command requires
-both workbooks to contain exactly `Balance Sheet`, `Income Statement`, and
-`Cash Flow Statement`; it writes a new file and leaves both inputs unchanged.
-
-```bash
-python -m financial_claw.core.workbook_merge \
-  companies/LGENSO/final_excel/excel/LGENSO_234Q_LGES_Audit_Report_CONFS_en_statements.xlsx \
-  companies/LGENSO/final_excel/excel/LGENSO_2024_LGES_Audit_Report_Consolidated_FS_ENG_statements.xlsx \
-  -o companies/LGENSO/final_excel/LGENSO_merged.xlsx
-```
-
-## Tests
-
-```bash
-pytest
-```
-
-The project uses a `src/` layout. Install the package in editable mode or set `PYTHONPATH=src` before running tests.
-
-## Excel tab naming note
-
-Excel limits worksheet titles to 31 characters. The cash-flow + comprehensive income sheet uses `Cash Flow &Comprehensive Income` (31 chars). The rendered sheet still contains the full section headings described in the product spec.
-
-## LLM hooks
-
-Enable optional repair / matcher stages with:
-
-```bash
-export FA_ENABLE_LLM_TABLE_REPAIR=1
-export FA_ENABLE_LLM_LINEITEM_MATCH=1
-export OPENAI_API_KEY=...
-```
-
-MiniMax table-extraction settings live in `src/financial_claw/llm/minimax/minimax_api.py`.
+- **Scale:** Numeric columns follow disclosure units where identifiable (commonly **millions**); verify unit phrases in source PDFs and extraction metadata.
+- **Sheet layout:** Annual periods occupy **left** column block; quarterly periods occupy **right** block (blank column separator when both blocks exist).
+- **Chronology:** Within annual and within quarterly blocks, columns are ordered **earliest → latest** (left → right).
+- **Merge ordering:** Input workbooks are composed so resulting period columns preserve that temporal ordering across sources.
