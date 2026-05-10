@@ -1,0 +1,41 @@
+{
+  "config_version": 1,
+  "statement_keywords": {
+    "balance_sheet": [
+      "consolidated statements of financial position"
+    ],
+    "income_statement": [
+      "consolidated statements of comprehensive income",
+      "consolidated statements of comprehensive income (loss)"
+    ],
+    "cash_flow": [
+      "consolidated statements of cash flows"
+    ]
+  },
+  "processed_reports": [
+    {
+      "file_name": "SKHYNIX 2023.PDF",
+      "source_path": "Financial_Statements/SKHYNIX 2023.PDF",
+      "sha256": "73316f6752cc5d7efada84091821c75dd6f1fe682fafebbadce8e4bfe5168d29",
+      "mtime": 1778373821.6999614,
+      "output_workbook": "final_excel/excel/SKHYNIX_SKHYNIX_2023_statements.xlsx",
+      "processed_at": "2026-05-10T08:39:09.542838+00:00"
+    },
+    {
+      "file_name": "SKHYNIX 2024.PDF",
+      "source_path": "Financial_Statements/SKHYNIX 2024.PDF",
+      "sha256": "f825089fdc353e8cb4c989eaacf4d730fd97cd6bf1228d8bf7e6c5a388b0c945",
+      "mtime": 1778373821.7330177,
+      "output_workbook": "final_excel/excel/SKHYNIX_SKHYNIX_2024_statements.xlsx",
+      "processed_at": "2026-05-10T08:39:09.543338+00:00"
+    },
+    {
+      "file_name": "SKHYNIX 2025.pdf",
+      "source_path": "Financial_Statements/SKHYNIX 2025.pdf",
+      "sha256": "bebdab921db4006d7c08fe74d0dd9cc09fe71d9ea629e24bea1bb8ef132c9f20",
+      "mtime": 1778373821.829473,
+      "output_workbook": "final_excel/excel/SKHYNIX_SKHYNIX_2025_statements.xlsx",
+      "processed_at": "2026-05-10T08:39:09.543718+00:00"
+    }
+  ]
+}

@@ -62,7 +62,8 @@ class MinerUOCRProvider:
     def extract_pages_tables(self, pdf_path: Path, page_numbers: list[int]) -> dict[int, OCRTableResult]:
         start = perf_counter()
         unique_page_numbers = sorted(set(page_numbers))
-        logger.info("MinerU OCR requested for {} page(s): {}", len(unique_page_numbers), unique_page_numbers)
+        logger.info("MinerU OCR requested for {} page(s)", len(unique_page_numbers))
+        logger.debug("MinerU OCR pages: {}", unique_page_numbers)
         image_dir = self.debug_dir / "rendered_pages"
         md_dir = self.debug_dir / "mineru_markdown"
         md_dir.mkdir(parents=True, exist_ok=True)
@@ -77,7 +78,7 @@ class MinerUOCRProvider:
             page_assets[page_number] = (image_path, markdown_path)
             if markdown_path.exists():
                 markdown_by_page[page_number] = markdown_path.read_text(encoding="utf-8", errors="replace")
-                logger.info(
+                logger.debug(
                     "MinerU cache hit: page={} markdown={} elapsed={:.2f}s",
                     page_number,
                     markdown_path,
@@ -85,7 +86,7 @@ class MinerUOCRProvider:
                 )
             else:
                 missing[page_number] = image_path
-                logger.info(
+                logger.debug(
                     "Rendered page for MinerU: page={} image={} elapsed={:.2f}s",
                     page_number,
                     image_path,
@@ -103,9 +104,9 @@ class MinerUOCRProvider:
                 markdown_path = page_assets[page_number][1]
                 markdown_path.write_text(markdown, encoding="utf-8")
                 markdown_by_page[page_number] = markdown
-                logger.info("Saved MinerU markdown: page={} path={}", page_number, markdown_path)
+                logger.debug("Saved MinerU markdown: page={} path={}", page_number, markdown_path)
         else:
-            logger.info("All requested MinerU pages were served from local markdown cache.")
+            logger.debug("All requested MinerU pages were served from local markdown cache.")
 
         results: dict[int, OCRTableResult] = {}
         for page_number in unique_page_numbers:
@@ -115,7 +116,7 @@ class MinerUOCRProvider:
             warnings: list[str] = []
             if not rows:
                 warnings.append("MinerU OCR returned no HTML table blocks.")
-            logger.info(
+            logger.debug(
                 "Parsed MinerU markdown: page={} rows={} warnings={} elapsed={:.2f}s",
                 page_number,
                 len(rows),
@@ -199,14 +200,14 @@ class MinerUOCRProvider:
         }
 
         apply_url = f"{cfg.base_url}/api/v4/file-urls/batch"
-        logger.info("MinerU precision: requesting upload URLs for {} file(s)", len(resolved_paths))
+        logger.debug("MinerU precision: requesting upload URLs for {} file(s)", len(resolved_paths))
         request_start = perf_counter()
         with httpx.Client(timeout=cfg.timeout_s, follow_redirects=True) as client:
             response = client.post(apply_url, headers=headers, json=payload)
             response.raise_for_status()
             resp_json = response.json()
         _raise_for_api_error(resp_json, "apply batch upload url")
-        logger.info("MinerU precision: upload URLs received in {:.2f}s", perf_counter() - request_start)
+        logger.debug("MinerU precision: upload URLs received in {:.2f}s", perf_counter() - request_start)
 
         data = resp_json.get("data") or {}
         batch_id = data.get("batch_id")
@@ -221,12 +222,12 @@ class MinerUOCRProvider:
                 with path.open("rb") as f:
                     put = client.put(upload_url, content=f.read())
                 put.raise_for_status()
-                logger.info(
+                logger.debug(
                     "MinerU precision: uploaded {} in {:.2f}s",
                     path.name,
                     perf_counter() - file_start,
                 )
-        logger.info("MinerU precision: upload phase complete in {:.2f}s", perf_counter() - upload_start)
+        logger.debug("MinerU precision: upload phase complete in {:.2f}s", perf_counter() - upload_start)
 
         poll_url = f"{cfg.base_url}/api/v4/extract-results/batch/{batch_id}"
         file_names = {path.name for path in resolved_paths}
@@ -250,7 +251,7 @@ class MinerUOCRProvider:
                 if item and item.get("file_name") in file_names
             }
             states = [results_by_name.get(name, {}).get("state") for name in file_names]
-            logger.info(
+            logger.debug(
                 "MinerU precision: poll #{} elapsed={:.1f}s states={}",
                 poll_count,
                 time.time() - start,
@@ -272,7 +273,7 @@ class MinerUOCRProvider:
             download_start = perf_counter()
             zbytes = _download_bytes(zip_url, timeout_s=max(cfg.timeout_s, 300.0))
             markdown_by_path[path] = _read_full_markdown_from_zip(zbytes)
-            logger.info(
+            logger.debug(
                 "MinerU precision: downloaded and read result for {} in {:.2f}s",
                 path.name,
                 perf_counter() - download_start,

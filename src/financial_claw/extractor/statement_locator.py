@@ -27,7 +27,6 @@ NON_TARGET_MAIN_TITLES = [
     re.compile(r"\bconsolidated\s+statements?\s+of\s+changes\s+in\s+equity\b", re.I),
 ]
 TARGET_STATEMENT_TYPES = {"balance_sheet", "income_statement", "cash_flow"}
-LOCATOR_CONFIG_NAME = "locator_config.json"
 STATEMENT_SET_MAX_GAP_PAGES = 12
 SUPPLEMENTARY_SECTION_RE = re.compile(
     r"\b(?:appendix|appendices|supplementary|additional financial information|"
@@ -276,7 +275,8 @@ def _company_locator_config_path(pdf_path: Path) -> Path | None:
     companies_idx = lowered.index("companies")
     if companies_idx + 1 >= len(parts):
         return None
-    return Path(*parts[: companies_idx + 2]) / LOCATOR_CONFIG_NAME
+    company = parts[companies_idx + 1]
+    return Path(*parts[: companies_idx + 2]) / f"{company}_config.json"
 
 
 def _merge_adjacent_same_statement(candidates: list[StatementCandidate]) -> list[StatementCandidate]:

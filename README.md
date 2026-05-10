@@ -18,14 +18,14 @@ Pipeline for extracting consolidated financial statements from issuer PDFs (annu
 
 **Runtime**
 
-- Python ≥ 3.11
+- Python >= 3.11
 - Install: `pip install -r requirements.txt` and `pip install -e .`
 - Core PDF stack: PyMuPDF (text geometry, page rasterization)
 
 **External services (optional)**
 
-- MinerU: API token for precision OCR; see `src/financial_claw/ocr/mineru/.env.example` (`MINERU_API_TOKEN`, …)
-- LLM toggles: root `.env.example` — `ENABLE_LLM_TABLE_REPAIR`, `ENABLE_LLM_LINEITEM_MATCH`, `OPENAI_*`
+- MinerU: API token for precision OCR; see `src/financial_claw/ocr/mineru/.env.example` (`MINERU_API_TOKEN`)
+- LLM toggles: root `.env.example` - `ENABLE_LLM_TABLE_REPAIR`, `ENABLE_LLM_LINEITEM_MATCH`, `OPENAI_*`
 - MiniMax helpers: `src/financial_claw/llm/minimax/.env.example`
 
 **Local execution without editable install**
@@ -40,24 +40,66 @@ PYTHONPATH=src python -m financial_claw.extractor.cli --help
 
 | Capability | Role |
 |------------|------|
-| Company ingest | Discover PDFs, SHA-256 manifests, parallel extraction (≤ 8 workers), merge successful runs into company final workbook |
-| Incremental update (target) | Existing summary workbook + new PDFs → extract each PDF → merge into master in chronological column order |
-| Single-PDF CLI | Full locate → extract → Excel for one file (`--debug`, `--ocr-provider mineru`, …) |
+| Company ingest | Discover PDFs, skip processed SHA-256s from company config, parallel extraction (max 8 workers), merge successful runs into company final workbook |
+| Incremental update | Existing final workbook + new or changed PDFs -> extract selected PDFs -> rebuild master in chronological column order |
+| Single-PDF CLI | Full locate -> extract -> Excel for one file (`--debug`, `--ocr-provider mineru`, etc.) |
 | Workbook merge | Union two or more compliant workbooks on shared sheet names and period semantics |
 
-### Company ingest
+### Company Ingest
 
 - **Inputs:** `companies/<Company>/Financial_Statements/*.pdf`
-- **Outputs:** `companies/<Company>/final_excel/excel/*_statements.xlsx`, debug under `final_excel/debug/`; manifest `final_excel/.processed.json`
-- **Final merge (init success):** `companies/<Company>/<Company>_financial_statements_final.xlsx`
+- **Outputs:** `companies/<Company>/final_excel/excel/*_statements.xlsx`, debug under `final_excel/debug/`
+- **Company config:** `companies/<Company>/<Company>_config.json`
+- **Final merge:** `companies/<Company>/<Company>_financial_statements_final.xlsx`
+
+The normal command only needs the company name. The pipeline resolves whether the run is a first-time init or an incremental update.
+It skips reports already recorded in the company config by SHA-256.
+If no final workbook exists, it performs an initial build.
+If a final workbook exists, it processes only new or changed PDFs.
+After each successful run, `processed_reports` in the company config is updated.
 
 ```bash
-python -m financial_claw.pipeline.ingest POSCO init
-python -m financial_claw.pipeline.ingest POSCO init --plan-only
-python -m financial_claw.pipeline.ingest POSCO update
+python -m financial_claw.pipeline.ingest POSCO
+python -m financial_claw.pipeline.ingest POSCO --plan-only
 ```
 
-### Single-PDF extraction
+Legacy explicit modes are still accepted for compatibility: `init`, `update`, and `run`.
+Default logs show only core progress at `INFO`; implementation details such as paths, hashes, page candidates, OCR fallback pages, and merge internals are emitted at `DEBUG`.
+
+Run all companies from the repository root:
+
+```powershell
+.\tests\run_all_company_init.ps1
+```
+
+```bash
+bash tests/run_all_company_init.sh
+```
+
+Company config shape:
+
+```json
+{
+  "config_version": 1,
+  "statement_keywords": {
+    "balance_sheet": ["consolidated statements of financial position"],
+    "income_statement": ["consolidated statements of profit or loss"],
+    "cash_flow": ["consolidated statements of cash flows"]
+  },
+  "processed_reports": [
+    {
+      "file_name": "example.pdf",
+      "source_path": "Financial_Statements/example.pdf",
+      "sha256": "...",
+      "mtime": 1778373821.0,
+      "output_workbook": "final_excel/excel/COMPANY_example_statements.xlsx",
+      "processed_at": "2026-05-10T00:00:00+00:00"
+    }
+  ]
+}
+```
+
+### Single-PDF Extraction
 
 - Default output root: `outputs/` (overridden when invoked from ingest)
 
@@ -67,7 +109,7 @@ python -m financial_claw.extractor.cli --pdf "companies/POSCO/Financial_Statemen
   --debug --ocr-provider mineru --mineru-mode precision --ocr-language en
 ```
 
-### Workbook merge
+### Workbook Merge
 
 - **Constraint:** Each workbook must contain exactly these sheets, in order: `Balance Sheet`, `Income Statement`, `Cash Flow Statement`
 
@@ -80,37 +122,39 @@ python -m financial_claw.core.workbook_merge \
 
 ---
 
-## Repository layout (`src/financial_claw/`)
+## Repository Layout (`src/financial_claw/`)
 
 | Path | Responsibility |
 |------|------------------|
 | `extractor/` | PDF profiling, statement localization, table extraction, Excel writer |
-| `pipeline/` | Discovery, ingest planning, parallel init orchestration |
+| `pipeline/` | Discovery, ingest planning, parallel company run orchestration |
 | `ocr/mineru/` | MinerU client, markdown/HTML table conversion |
 | `llm/minimax/` | MiniMax API utilities for image/table experiments |
 | `core/` | Normalization, validation, workbook merge, caches |
 
 ---
 
-## Typical workspace tree
+## Typical Workspace Tree
 
 ```text
 companies/
   POSCO/
     Financial_Statements/
       *.pdf
+    POSCO_config.json
     POSCO_financial_statements_final.xlsx
     final_excel/
       excel/
         *_statements.xlsx
-      .processed.json
+      debug/
 ```
 
 ---
 
-## Data format (merged outputs)
+## Data Format
 
-- **Scale:** Numeric columns follow disclosure units where identifiable (commonly **millions**); verify unit phrases in source PDFs and extraction metadata.
-- **Sheet layout:** Annual periods occupy **left** column block; quarterly periods occupy **right** block (blank column separator when both blocks exist).
-- **Chronology:** Within annual and within quarterly blocks, columns are ordered **earliest → latest** (left → right).
+- **Scale:** Numeric monetary columns are normalized to **millions** when units are identifiable.
+- **Sheet layout:** Annual periods occupy the left column block; quarterly periods occupy the right block, with a blank column separator when both blocks exist.
+- **Quarter labels:** Duration-specific interim columns use labels such as `3-Month Q3 2024` or `9-Month Q3 2024`; if no duration is explicit, labels use `Q3 2024`.
+- **Chronology:** Within annual and quarterly blocks, columns are ordered earliest -> latest, left -> right.
 - **Merge ordering:** Input workbooks are composed so resulting period columns preserve that temporal ordering across sources.

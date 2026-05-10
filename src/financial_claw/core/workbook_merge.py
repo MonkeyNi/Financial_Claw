@@ -72,7 +72,7 @@ def merge_workbook_sequence(workbook_paths: list[Path], output_path: Path) -> Pa
         (_parse_workbook(path) for path in workbook_paths),
         key=lambda item: (item[0], str(item[1]).lower()),
     )
-    logger.info(
+    logger.debug(
         "Merging {} workbooks in period order: {}",
         len(parsed_workbooks),
         [str(path) for _, path, _ in parsed_workbooks],
@@ -82,14 +82,14 @@ def merge_workbook_sequence(workbook_paths: list[Path], output_path: Path) -> Pa
         parsed_sheets = [workbook[sheet_name] for _, _, workbook in parsed_workbooks]
         merged_rows = list(parsed_sheets[0].rows)
         for parsed in parsed_sheets[1:]:
-            logger.info("Merging sheet: {} <- {}", sheet_name, parsed.title)
+            logger.debug("Merging sheet: {} <- {}", sheet_name, parsed.title)
             merged_rows = merge_statement_rows(merged_rows, parsed.rows)
         periods = _merge_all_periods(parsed_sheets)
         write_merged_sheet(out_wb, sheet_name, merged_rows, periods)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     out_wb.save(output_path)
-    logger.info("Merged workbook saved: {}", output_path)
+    logger.debug("Merged workbook saved: {}", output_path)
     return output_path
 
 

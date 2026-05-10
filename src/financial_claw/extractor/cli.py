@@ -5,6 +5,7 @@ import copy
 import json
 from dataclasses import dataclass
 from pathlib import Path
+import sys
 from time import perf_counter
 from typing import Literal
 
@@ -58,6 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    configure_logging()
     args = build_parser().parse_args()
     try:
         run_pdf_extraction(
@@ -92,10 +94,10 @@ def run_pdf_extraction(config: PdfExtractionConfig) -> PdfExtractionSummary:
         raise FileNotFoundError(pdf_path)
     validate_pdf_extraction_config(config)
 
-    logger.info("Starting extraction")
-    logger.info("PDF: {}", pdf_path)
-    logger.info("Output root: {}", output_root)
-    logger.info(
+    logger.info("[extract-start] file={}", pdf_path.name)
+    logger.debug("PDF: {}", pdf_path)
+    logger.debug("Output root: {}", output_root)
+    logger.debug(
         "Options: debug={} ocr_provider={} mineru_mode={} ocr_language={} render_dpi={}",
         config.debug,
         config.ocr_provider,
@@ -129,7 +131,7 @@ def run_pdf_extraction(config: PdfExtractionConfig) -> PdfExtractionSummary:
     )
     _log_step_done("Locate statement candidates", step_start, candidates=len(candidates))
     for candidate in candidates:
-        logger.info(
+        logger.debug(
             "Candidate: type={} pages={}..{} title={!r} score={}",
             candidate.statement_type,
             candidate.page_start,
@@ -140,7 +142,7 @@ def run_pdf_extraction(config: PdfExtractionConfig) -> PdfExtractionSummary:
 
     ocr_provider = None
     if config.ocr_provider == "mineru":
-        logger.info(
+        logger.debug(
             "Initializing MinerU OCR provider: mode={} language={} dpi={} debug_dir={}",
             config.mineru_mode,
             config.ocr_language,
@@ -187,12 +189,12 @@ def run_pdf_extraction(config: PdfExtractionConfig) -> PdfExtractionSummary:
         extract_page_text_debug(pdf_path, debug_dir / "page_text")
         _log_step_done("Write page text debug files", step_start)
 
-    logger.info("Pages: {}", len(profiles))
-    logger.info("Candidates: {}", len(candidates))
-    logger.info("Excel: {}", output_path)
-    logger.info("Debug: {}", debug_dir)
+    logger.debug("Pages: {}", len(profiles))
+    logger.debug("Candidates: {}", len(candidates))
+    logger.debug("Excel: {}", output_path)
+    logger.debug("Debug: {}", debug_dir)
     elapsed_s = perf_counter() - run_start
-    logger.info("Extraction finished in {:.2f}s", elapsed_s)
+    logger.info("[extract-done] file={} candidates={} elapsed={:.2f}s output={}", pdf_path.name, len(candidates), elapsed_s, output_path.name)
     return PdfExtractionSummary(
         pdf_path=pdf_path,
         output_path=output_path,
@@ -204,13 +206,13 @@ def run_pdf_extraction(config: PdfExtractionConfig) -> PdfExtractionSummary:
 
 
 def _log_step_start(name: str) -> float:
-    logger.info("[step] {} ...", name)
+    logger.debug("[step] {} ...", name)
     return perf_counter()
 
 
 def _log_step_done(name: str, start: float, **fields: object) -> None:
     suffix = " ".join(f"{key}={value}" for key, value in fields.items())
-    logger.info("[done] {} in {:.2f}s{}", name, perf_counter() - start, f" ({suffix})" if suffix else "")
+    logger.debug("[done] {} in {:.2f}s{}", name, perf_counter() - start, f" ({suffix})" if suffix else "")
 
 
 def _safe_name(name: str) -> str:
@@ -252,6 +254,11 @@ def merge_comprehensive_income(results: list[ExtractionResult]) -> list[Extracti
             continue
         merged.append(result)
     return merged
+
+
+def configure_logging() -> None:
+    logger.remove()
+    logger.add(sys.stderr, level="INFO")
 
 
 if __name__ == "__main__":
