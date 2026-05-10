@@ -13,7 +13,7 @@ from loguru import logger
 from .excel_writer import write_workbook
 from .metadata import extract_metadata, infer_company_from_path
 from .pdf_profile import extract_page_text_debug, load_page_profiles
-from .providers import MinerUOCRProvider, validate_mineru_configuration
+from .providers import ConfigurationError, MinerUOCRProvider, validate_mineru_configuration
 from .statement_locator import locate_statement_candidates
 from .table_extractor import extract_candidate_tables
 from .models import ExtractionResult
@@ -58,19 +58,23 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    run_pdf_extraction(
-        PdfExtractionConfig(
-            pdf_path=Path(args.pdf),
-            output_dir=Path(args.output_dir),
-            company=args.company,
-            debug=args.debug,
-            max_continuation_pages=args.max_continuation_pages,
-            ocr_provider=args.ocr_provider,
-            mineru_mode=args.mineru_mode,
-            ocr_language=args.ocr_language,
-            render_dpi=args.render_dpi,
+    try:
+        run_pdf_extraction(
+            PdfExtractionConfig(
+                pdf_path=Path(args.pdf),
+                output_dir=Path(args.output_dir),
+                company=args.company,
+                debug=args.debug,
+                max_continuation_pages=args.max_continuation_pages,
+                ocr_provider=args.ocr_provider,
+                mineru_mode=args.mineru_mode,
+                ocr_language=args.ocr_language,
+                render_dpi=args.render_dpi,
+            )
         )
-    )
+    except ConfigurationError as exc:
+        logger.warning("[configuration-check-failed] {}", exc)
+        return 1
     return 0
 
 

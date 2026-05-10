@@ -15,7 +15,7 @@ try:
     from financial_claw.core.models import ReportFile
     from financial_claw.core.workbook_merge import merge_workbook_sequence
     from financial_claw.extractor.cli import PdfExtractionConfig, PdfExtractionSummary, run_pdf_extraction
-    from financial_claw.extractor.providers import validate_mineru_configuration
+    from financial_claw.extractor.providers import ConfigurationError, validate_mineru_configuration
 except ModuleNotFoundError:  # allows direct script execution from repo root
     import sys
 
@@ -29,7 +29,10 @@ except ModuleNotFoundError:  # allows direct script execution from repo root
         PdfExtractionSummary,
         run_pdf_extraction,
     )
-    from financial_claw.extractor.providers import validate_mineru_configuration  # type: ignore[no-redef]
+    from financial_claw.extractor.providers import (  # type: ignore[no-redef]
+        ConfigurationError,
+        validate_mineru_configuration,
+    )
 
 
 def select_input_files(
@@ -424,18 +427,22 @@ if __name__ == "__main__":
         logger.info("- {} sha256={}... mtime={}", r.file_name, r.sha256[:12], r.mtime)
 
     if args.mode == "init" and not args.plan_only:
-        summary = run_company_init(
-            plan,
-            output_dir=args.output_dir,
-            max_workers=args.max_workers,
-            debug=args.debug,
-            ocr_provider=args.ocr_provider,
-            mineru_mode=args.mineru_mode,
-            ocr_language=args.ocr_language,
-            render_dpi=args.render_dpi,
-            max_continuation_pages=args.max_continuation_pages,
-            max_retries=args.max_retries,
-        )
+        try:
+            summary = run_company_init(
+                plan,
+                output_dir=args.output_dir,
+                max_workers=args.max_workers,
+                debug=args.debug,
+                ocr_provider=args.ocr_provider,
+                mineru_mode=args.mineru_mode,
+                ocr_language=args.ocr_language,
+                render_dpi=args.render_dpi,
+                max_continuation_pages=args.max_continuation_pages,
+                max_retries=args.max_retries,
+            )
+        except ConfigurationError as exc:
+            logger.warning("[configuration-check-failed] {}", exc)
+            raise SystemExit(1) from None
         if summary.failed:
             raise SystemExit(1)
         try:

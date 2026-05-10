@@ -36,6 +36,10 @@ class OCRTableResult:
     warnings: list[str]
 
 
+class ConfigurationError(RuntimeError):
+    pass
+
+
 class MinerUOCRProvider:
     def __init__(
         self,
@@ -297,7 +301,10 @@ def validate_mineru_configuration(*, mode: str) -> None:
     from financial_claw.ocr.mineru.mineru_api import load_mineru_api_token  # type: ignore
 
     if not load_mineru_api_token(_mineru_package_dir()):
-        raise RuntimeError("MINERU_API_TOKEN is required for precision mode.")
+        raise ConfigurationError(
+            f"MINERU_API_TOKEN is required for precision mode. "
+            f"Set it in the environment or in src/financial_claw/ocr/mineru/.env."
+        )
 
 
 def _mineru_package_dir() -> Path:
