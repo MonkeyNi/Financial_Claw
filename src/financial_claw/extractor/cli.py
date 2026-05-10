@@ -14,7 +14,8 @@ from .excel_writer import write_workbook
 from .metadata import extract_metadata, infer_company_from_path
 from .pdf_profile import extract_page_text_debug, load_page_profiles
 from .providers import ConfigurationError, MinerUOCRProvider, validate_mineru_configuration
-from .statement_locator import locate_statement_candidates
+from .reconciliation import apply_reconciliation_checks
+from .statement_locator import load_company_locator_config, locate_statement_candidates
 from .table_extractor import extract_candidate_tables
 from .models import ExtractionResult
 
@@ -120,7 +121,12 @@ def run_pdf_extraction(config: PdfExtractionConfig) -> PdfExtractionSummary:
     _log_step_done("Extract metadata", step_start, company=company)
 
     step_start = _log_step_start("Locate statement candidates")
-    candidates = locate_statement_candidates(profiles, max_continuation_pages=config.max_continuation_pages)
+    locator_config = load_company_locator_config(pdf_path)
+    candidates = locate_statement_candidates(
+        profiles,
+        max_continuation_pages=config.max_continuation_pages,
+        locator_config=locator_config,
+    )
     _log_step_done("Locate statement candidates", step_start, candidates=len(candidates))
     for candidate in candidates:
         logger.info(
@@ -157,6 +163,10 @@ def run_pdf_extraction(config: PdfExtractionConfig) -> PdfExtractionSummary:
     step_start = _log_step_start("Merge comprehensive income")
     results = merge_comprehensive_income(extracted_results)
     _log_step_done("Merge comprehensive income", step_start, results=len(results))
+
+    step_start = _log_step_start("Run reconciliation checks")
+    results = apply_reconciliation_checks(results)
+    _log_step_done("Run reconciliation checks", step_start, results=len(results))
 
     output_path = excel_dir / f"{company}_{_safe_name(pdf_path.stem)}_statements.xlsx"
     step_start = _log_step_start("Write Excel outputs")

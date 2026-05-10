@@ -1,0 +1,14 @@
+{
+  "statement_keywords": {
+    "balance_sheet": [
+      "consolidated statements of financial position"
+    ],
+    "income_statement": [
+      "consolidated statements of comprehensive income",
+      "consolidated statements of comprehensive income (loss)"
+    ],
+    "cash_flow": [
+      "consolidated statements of cash flows"
+    ]
+  }
+}

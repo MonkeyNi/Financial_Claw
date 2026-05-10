@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import re
 
@@ -8,6 +9,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 from .cleaning_config import CELL_TEXT_REPLACEMENTS
 from .models import ExtractionResult, PageProfile, StatementCandidate
+from .reconciliation import FAILED_RECONCILIATION_CELLS_KEY
 
 _FONT_FAMILY = "Arial"
 _FONT_SIZE = 10
@@ -22,11 +24,15 @@ DEFAULT_FONT = Font(name=_FONT_FAMILY, size=_FONT_SIZE, color="000000")
 HEADER_FONT = Font(name=_FONT_FAMILY, size=_FONT_SIZE, bold=True, color=_HEADER_FONT_COLOR)
 HEADER_FILL = PatternFill(fill_type="solid", fgColor=_HEADER_FILL)
 YELLOW_ASSUMPTION_FILL = PatternFill(fill_type="solid", fgColor="FFF200")
+RECONCILIATION_FAILURE_FILL = PatternFill(fill_type="solid", fgColor="FFC7CE")
 INTEGER_FORMAT = '#,##0;(#,##0);"-"'
-DECIMAL_FORMAT = '#,##0.0;(#,##0.0);"-"'
+DECIMAL_FORMAT = '#,##0.######;(#,##0.######);"-"'
 SCORE_FORMAT = '0.0000;(-0.0000);"-"'
 
 NUMBER_TOKEN_RE = re.compile(r"^\(?-?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?\)?$|^-$")
+MILLION = Decimal("1000000")
+THOUSAND_TO_MILLION = Decimal("0.001")
+BILLION_TO_MILLION = Decimal("1000")
 
 
 def write_workbook(
@@ -51,14 +57,24 @@ def write_workbook(
         used_names.add(name)
         out_ws = wb.create_sheet(name)
         note_columns = _note_columns(result.rows)
+        million_scale = _million_scale_for_rows(result.rows)
+        failed_reconciliation_cells = set(getattr(result, FAILED_RECONCILIATION_CELLS_KEY, []))
         for row in result.rows:
+            convert_monetary_values = not _is_non_monetary_row(row)
             out_ws.append(
                 [
-                    _coerce_excel_cell_value(cell, force_text=(col_idx in note_columns))
+                    _coerce_excel_cell_value(
+                        cell,
+                        force_text=(col_idx in note_columns),
+                        million_scale=million_scale if convert_monetary_values else Decimal("1"),
+                        normalize_unit_text=million_scale != Decimal("1"),
+                    )
                     for col_idx, cell in enumerate(row)
                 ]
             )
+        _highlight_failed_reconciliation_cells(out_ws, failed_reconciliation_cells)
         _style_statement_sheet(out_ws)
+        _highlight_failed_reconciliation_cells(out_ws, failed_reconciliation_cells)
         records.append(_record_row(output_path, metadata, result, name))
     if not wb.sheetnames:
         no_statement_ws = wb.create_sheet("NoStatements")
@@ -147,7 +163,12 @@ def _note_columns(rows: list[list[str]]) -> set[int]:
     return note_columns
 
 
-def _coerce_excel_cell_value(value: object, force_text: bool = False) -> object:
+def _coerce_excel_cell_value(
+    value: object,
+    force_text: bool = False,
+    million_scale: Decimal = Decimal("1"),
+    normalize_unit_text: bool = False,
+) -> object:
     if value is None:
         return ""
     if not isinstance(value, str):
@@ -160,6 +181,8 @@ def _coerce_excel_cell_value(value: object, force_text: bool = False) -> object:
     text = _apply_cell_text_replacements(value).strip()
     if not text:
         return ""
+    if normalize_unit_text:
+        text = _normalize_unit_text_to_millions(text)
     if force_text:
         return text
     if re.fullmatch(r"\d{4}", text):
@@ -173,10 +196,66 @@ def _coerce_excel_cell_value(value: object, force_text: bool = False) -> object:
     negative = normalized_number.startswith("(") and normalized_number.endswith(")")
     cleaned = normalized_number.strip("()").replace(",", "")
     try:
-        number = float(cleaned) if "." in cleaned else int(cleaned)
-    except ValueError:
+        number = Decimal(cleaned) * million_scale
+    except (InvalidOperation, ValueError):
         return text
-    return -number if negative else number
+    if negative:
+        number = -number
+    return int(number) if number == number.to_integral_value() else number
+
+
+def _million_scale_for_rows(rows: list[list[str]]) -> Decimal:
+    text = " ".join(
+        str(cell)
+        for row in rows[:12]
+        for cell in row
+        if str(cell or "").strip()
+    ).lower()
+    text = re.sub(r"\s+", " ", text)
+    if not text:
+        return Decimal("1")
+    if re.search(r"(?<![a-z0-9])(?:\$|us\$|hk\$|krw|won|w|₩)\s*m\b", text):
+        return Decimal("1")
+    if re.search(r"(?<![a-z0-9])(?:\$|us\$|hk\$|krw|won|w|₩)\s*0{3}\b", text) or re.search(r"\$000\b", text):
+        return THOUSAND_TO_MILLION
+    if re.search(r"\b(?:in|expressed in|amounts? in)[^.;:()]{0,80}\bthousands?\b", text):
+        return THOUSAND_TO_MILLION
+    if re.search(r"\b(?:in|expressed in|amounts? in)[^.;:()]{0,80}\bbillions?\b", text):
+        return BILLION_TO_MILLION
+    if re.search(r"\b(?:in|expressed in|amounts? in)[^.;:()]{0,80}\bmillions?\b", text):
+        return Decimal("1")
+    if re.search(r"\b(?:in|expressed in|amounts? in)[^.;:()]{0,80}\b(?:won|dollars?|usd|krw)\b", text):
+        return Decimal("1") / MILLION
+    return Decimal("1")
+
+
+def _is_non_monetary_row(row: list[str]) -> bool:
+    label = str(row[0] if row else "").strip().lower()
+    return bool(
+        re.search(r"\bper share\b", label)
+        or re.search(r"\bearnings? per\b", label)
+        or re.search(r"\bnumber of shares?\b", label)
+        or re.search(r"\bweighted average\b", label)
+    )
+
+
+def _normalize_unit_text_to_millions(text: str) -> str:
+    normalized = re.sub(r"\bin\s+thousands?\b", "in millions", text, flags=re.I)
+    normalized = re.sub(r"\bin\s+billions?\b", "in millions", normalized, flags=re.I)
+    normalized = re.sub(
+        r"\b(expressed)\s+in\s+((?:korean\s+)?won|krw|(?:u\.s\.\s+)?dollars?|usd)\b",
+        lambda match: f"{match.group(1)} in millions of {match.group(2)}",
+        normalized,
+        flags=re.I,
+    )
+    normalized = re.sub(
+        r"\b(amounts?)\s+in\s+((?:korean\s+)?won|krw|(?:u\.s\.\s+)?dollars?|usd)\b",
+        lambda match: f"{match.group(1)} in millions of {match.group(2)}",
+        normalized,
+        flags=re.I,
+    )
+    normalized = re.sub(r"\$000\b", "$m", normalized, flags=re.I)
+    return normalized
 
 
 def _apply_cell_text_replacements(text: str) -> str:
@@ -186,12 +265,19 @@ def _apply_cell_text_replacements(text: str) -> str:
 
 
 def _normalize_number_text(text: str) -> str:
-    cleaned = text.replace("$", "").strip()
+    cleaned = _strip_currency_prefix(text)
     if cleaned.startswith("W "):
         cleaned = cleaned[2:].strip()
     if cleaned.endswith(" W"):
         cleaned = cleaned[:-2].strip()
     return cleaned
+
+
+def _strip_currency_prefix(text: str) -> str:
+    cleaned = text.strip()
+    cleaned = re.sub(r"^(?:US\$|HK\$|KRW|USD|\$|￦|₩|¥|鈧\?|锟\?|�)\s*", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"\s*(?:US\$|HK\$|KRW|USD|\$|￦|₩|¥|鈧\?|锟\?|�)$", "", cleaned, flags=re.I)
+    return cleaned.strip()
 
 
 def _style_statement_sheet(ws) -> None:
@@ -209,6 +295,15 @@ def _style_record_sheet(ws) -> None:
     ws.auto_filter.ref = ws.dimensions
     _apply_financial_table_style(ws, statement_sheet=False)
     _highlight_attention_columns(ws)
+
+
+def _highlight_failed_reconciliation_cells(ws, cells: set[tuple[int, int]]) -> None:
+    for row_idx, col_idx in cells:
+        ws.cell(row=row_idx + 1, column=col_idx + 1).fill = RECONCILIATION_FAILURE_FILL
+
+
+def _is_reconciliation_failure_cell(cell) -> bool:
+    return cell.fill.fill_type == "solid" and cell.fill.fgColor.rgb == "00FFC7CE"
 
 
 def _apply_financial_table_style(ws, *, statement_sheet: bool) -> None:
@@ -255,15 +350,21 @@ def _apply_financial_table_style(ws, *, statement_sheet: bool) -> None:
                 cell.border = header_right_border if col_idx == max_col else grid_border
                 continue
 
-            if is_period:
+            if _is_reconciliation_failure_cell(cell):
+                pass
+            elif is_period:
                 cell.fill = period_fill
                 cell.font = Font(name=_FONT_FAMILY, size=_FONT_SIZE, bold=True, color="000000")
 
-            if is_section:
+            if _is_reconciliation_failure_cell(cell):
+                pass
+            elif is_section:
                 cell.fill = section_fill
                 cell.font = section_font
 
-            if is_total:
+            if _is_reconciliation_failure_cell(cell):
+                pass
+            elif is_total:
                 cell.fill = total_fill
                 cell.font = total_font
                 cell.border = total_right_border if col_idx == max_col else total_border
@@ -287,11 +388,13 @@ def _highlight_attention_columns(ws) -> None:
 def _is_numeric_cell_value(value: object) -> bool:
     if isinstance(value, bool):
         return False
-    return isinstance(value, (int, float))
+    return isinstance(value, (int, float, Decimal))
 
 
-def _number_format_for_value(value: int | float) -> str:
+def _number_format_for_value(value: int | float | Decimal) -> str:
     if isinstance(value, float) and not value.is_integer():
+        return DECIMAL_FORMAT
+    if isinstance(value, Decimal) and value != value.to_integral_value():
         return DECIMAL_FORMAT
     return INTEGER_FORMAT
 

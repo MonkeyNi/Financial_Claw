@@ -122,6 +122,7 @@ def _align_continuation_rows(rows: list[list[str]], previous_rows: list[list[str
     target_width = max((len(row) for row in previous_rows if row), default=0)
     if target_width < 4:
         return rows
+    rows = _drop_extra_continuation_helper_column(rows, target_width)
     aligned: list[list[str]] = []
     for row in rows:
         if len(row) == target_width - 1 and _looks_like_missing_notes_column(row):
@@ -129,6 +130,27 @@ def _align_continuation_rows(rows: list[list[str]], previous_rows: list[list[str
         else:
             aligned.append(row)
     return aligned
+
+
+def _drop_extra_continuation_helper_column(rows: list[list[str]], target_width: int) -> list[list[str]]:
+    if not rows or max((len(row) for row in rows), default=0) != target_width + 1:
+        return rows
+    for col_idx in range(1, target_width):
+        cells = [str(row[col_idx] or "").strip() for row in rows if len(row) > col_idx]
+        if not cells:
+            continue
+        helper_cells = [cell for cell in cells if cell]
+        if not helper_cells or all(_is_currency_artifact(cell) for cell in helper_cells):
+            return [
+                row[:col_idx] + row[col_idx + 1 :] if len(row) == target_width + 1 else row
+                for row in rows
+            ]
+    return rows
+
+
+def _is_currency_artifact(text: str) -> bool:
+    normalized = text.strip()
+    return normalized in {"$", "鈧?", "锟?", "￦", "₩", "KRW", "USD"}
 
 
 def _looks_like_missing_notes_column(row: list[str]) -> bool:
@@ -445,12 +467,19 @@ def _is_amount_token(token: str) -> bool:
 
 
 def _normalize_number_token(token: str) -> str:
-    cleaned = token.strip().replace("$", "").replace("￦", "").replace("¥", "").strip()
+    cleaned = _strip_currency_prefix(token)
     if cleaned.startswith("W "):
         cleaned = cleaned[2:].strip()
     if cleaned.endswith(" W"):
         cleaned = cleaned[:-2].strip()
     return cleaned
+
+
+def _strip_currency_prefix(token: str) -> str:
+    cleaned = token.strip()
+    cleaned = re.sub(r"^(?:US\$|HK\$|KRW|USD|\$|￦|₩|¥|鈧\?|锟\?|�)\s*", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"\s*(?:US\$|HK\$|KRW|USD|\$|￦|₩|¥|鈧\?|锟\?|�)$", "", cleaned, flags=re.I)
+    return cleaned.strip()
 
 
 def _cluster_x_positions(xs: list[float], tolerance: float, min_count: int, max_columns: int) -> list[float]:

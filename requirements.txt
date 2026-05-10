@@ -3,3 +3,4 @@ pymupdf
 openpyxl
 httpx
 requests
+pytest>=8

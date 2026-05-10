@@ -36,10 +36,11 @@ class Period:
     kind: Literal["annual", "quarter"]
     year: int
     quarter: int = 0
+    duration_months: int = 0
 
     @property
-    def sort_key(self) -> tuple[int, int]:
-        return (self.year, self.quarter)
+    def sort_key(self) -> tuple[int, int, int]:
+        return (self.year, self.quarter, self.duration_months)
 
 
 @dataclass
@@ -99,11 +100,11 @@ def validate_extracted_workbook(path: Path) -> None:
         parse_statement_sheet(wb[sheet_name])
 
 
-def workbook_latest_period_sort_key(path: Path) -> tuple[int, int]:
+def workbook_latest_period_sort_key(path: Path) -> tuple[int, int, int]:
     return _parse_workbook(path)[0]
 
 
-def _parse_workbook(path: Path) -> tuple[tuple[int, int], Path, dict[str, ParsedSheet]]:
+def _parse_workbook(path: Path) -> tuple[tuple[int, int, int], Path, dict[str, ParsedSheet]]:
     wb = load_workbook(path, data_only=True)
     _validate_workbook(wb, path)
     parsed = {sheet_name: parse_statement_sheet(wb[sheet_name]) for sheet_name in EXPECTED_SHEETS}
@@ -124,11 +125,14 @@ def _validate_workbook(wb, path: Path) -> None:
 
 def parse_statement_sheet(ws) -> ParsedSheet:
     header_row, periods = _find_period_header(ws)
+    periods = _with_entity_context_for_duplicate_periods(ws, header_row, periods)
     title = str(ws.cell(row=1, column=1).value or ws.title)
     rows: list[StatementRow] = []
     seen: dict[str, int] = {}
 
     for row_idx in range(header_row + 1, ws.max_row + 1):
+        if _is_unit_row(ws, row_idx, periods):
+            continue
         label = _row_label(ws, row_idx, periods)
         if not label:
             continue
@@ -163,6 +167,100 @@ def _find_period_header(ws) -> tuple[int, dict[int, Period]]:
     if not best_periods:
         raise ValueError(f"Could not find period header row in sheet {ws.title!r}")
     return best_row, best_periods
+
+
+def _with_entity_context_for_duplicate_periods(
+    ws,
+    header_row: int,
+    periods: dict[int, Period],
+) -> dict[int, Period]:
+    labels = [period.label for period in periods.values()]
+    if len(labels) == len(set(labels)):
+        return periods
+
+    contextual: dict[int, Period] = {}
+    for col_idx, period in periods.items():
+        entity = _entity_header_for_column(ws, header_row, col_idx)
+        if not entity:
+            contextual[col_idx] = period
+            continue
+        contextual[col_idx] = Period(
+            label=f"{entity} {period.label}",
+            kind=period.kind,
+            year=period.year,
+            quarter=period.quarter,
+            duration_months=period.duration_months,
+        )
+    return contextual
+
+
+def _entity_header_for_column(ws, header_row: int, col_idx: int) -> str:
+    for row_idx in range(header_row - 1, 0, -1):
+        value = ws.cell(row=row_idx, column=col_idx).value
+        if value is None:
+            text = ""
+        else:
+            text = str(value).strip()
+        if _looks_like_entity_header(text):
+            return text
+        for left_col in range(col_idx - 1, 0, -1):
+            value = ws.cell(row=row_idx, column=left_col).value
+            if value is None:
+                continue
+            text = str(value).strip()
+            if _looks_like_entity_header(text):
+                return text
+    return ""
+
+
+def _looks_like_entity_header(text: str) -> bool:
+    normalized = text.strip()
+    if not normalized:
+        return False
+    if parse_period(normalized) is not None:
+        return False
+    if _looks_like_statement_title(normalized):
+        return False
+    if _looks_like_period_descriptor(normalized):
+        return False
+    if normalized.lower() in {"note", "notes", "$m", "$000", "$", "m"}:
+        return False
+    if _is_numeric_like(normalized):
+        return False
+    return bool(re.search(r"[A-Za-z]", normalized))
+
+
+def _looks_like_statement_title(text: str) -> bool:
+    normalized = re.sub(r"\s+", " ", text.strip().lower())
+    return bool(
+        re.search(r"\bconsolidated\s+statements?\s+of\s+", normalized)
+        or re.search(r"\bconsolidated\s+(?:income|cash\s+flow|balance\s+sheet)s?\b", normalized)
+        or re.search(r"\binterim\s+condensed\s+consolidated\b", normalized)
+    )
+
+
+def _looks_like_period_descriptor(text: str) -> bool:
+    normalized = re.sub(r"\s+", " ", text.strip().lower())
+    return bool(
+        re.search(r"\bfor\s+(?:each\s+of\s+)?the\b", normalized)
+        and re.search(r"\b(?:three|six|nine|twelve)[-\s]months?\b", normalized)
+        and re.search(r"\bperiods?\b", normalized)
+    )
+
+
+def _is_unit_row(ws, row_idx: int, periods: dict[int, Period]) -> bool:
+    period_cols = set(periods)
+    values = [
+        str(ws.cell(row=row_idx, column=col_idx).value or "").strip().lower()
+        for col_idx in range(1, ws.max_column + 1)
+    ]
+    non_empty = [value for value in values if value]
+    if not non_empty:
+        return False
+    allowed = {"note", "notes", "$m", "$000", "$", "m"}
+    if not all(value in allowed for value in non_empty):
+        return False
+    return any(values[col_idx - 1] in {"$m", "$000", "$", "m"} for col_idx in period_cols)
 
 
 def _looks_like_period_value_column(ws, header_row: int, col_idx: int) -> bool:
@@ -216,7 +314,14 @@ def parse_period_with_context(value: object, context: str) -> Period | None:
     quarter = _quarter_from_context(context)
     if quarter is None:
         return period
-    return Period(label=f"Q{quarter} {period.year}", kind="quarter", year=period.year, quarter=quarter)
+    duration_months = _duration_months_from_context(context)
+    return Period(
+        label=_quarter_label(period.year, quarter, duration_months),
+        kind="quarter",
+        year=period.year,
+        quarter=quarter,
+        duration_months=duration_months,
+    )
 
 
 def parse_period(value: object) -> Period | None:
@@ -227,23 +332,30 @@ def parse_period(value: object) -> Period | None:
         return None
     normalized = re.sub(r"\s+", " ", text.replace("\n", " "))
 
-    quarter_match = re.search(r"\bQ([1-4])\s*(20\d{2})\b", normalized, re.I)
+    quarter_match = re.search(r"\b(?:(\d{1,2})\s*-\s*months?\s+)?Q([1-4])\s*(20\d{2})\b", normalized, re.I)
     if not quarter_match:
         quarter_match = re.search(r"\b(20\d{2})\s*Q([1-4])\b", normalized, re.I)
         if quarter_match:
             year = int(quarter_match.group(1))
             quarter = int(quarter_match.group(2))
-            return Period(label=f"Q{quarter} {year}", kind="quarter", year=year, quarter=quarter)
+            return Period(label=_quarter_label(year, quarter, 0), kind="quarter", year=year, quarter=quarter)
     else:
-        quarter = int(quarter_match.group(1))
-        year = int(quarter_match.group(2))
-        return Period(label=f"Q{quarter} {year}", kind="quarter", year=year, quarter=quarter)
+        duration_months = int(quarter_match.group(1) or 0)
+        quarter = int(quarter_match.group(2))
+        year = int(quarter_match.group(3))
+        return Period(
+            label=_quarter_label(year, quarter, duration_months),
+            kind="quarter",
+            year=year,
+            quarter=quarter,
+            duration_months=duration_months,
+        )
 
     fy_quarter_match = re.search(r"\bFY(\d{2})\s*([1-4])Q\b", normalized, re.I)
     if fy_quarter_match:
         year = 2000 + int(fy_quarter_match.group(1))
         quarter = int(fy_quarter_match.group(2))
-        return Period(label=f"Q{quarter} {year}", kind="quarter", year=year, quarter=quarter)
+        return Period(label=_quarter_label(year, quarter, 0), kind="quarter", year=year, quarter=quarter)
 
     interim_period = _parse_interim_period(normalized)
     if interim_period is not None:
@@ -272,18 +384,41 @@ def _parse_interim_period(text: str) -> Period | None:
     quarter = _quarter_from_month_day(month, day)
     if quarter is None:
         return None
-    return Period(label=f"Q{quarter} {year}", kind="quarter", year=year, quarter=quarter)
+    duration_months = _duration_months_from_context(normalized)
+    return Period(
+        label=_quarter_label(year, quarter, duration_months),
+        kind="quarter",
+        year=year,
+        quarter=quarter,
+        duration_months=duration_months,
+    )
 
 
 def _quarter_from_context(text: str) -> int | None:
     normalized = re.sub(r"\s+", " ", text).lower()
-    if re.search(r"\bmarch\s+31\b", normalized) or "three-month" in normalized or "three month" in normalized:
-        return 1
-    if re.search(r"\bjun(?:e)?\s+30\b", normalized) or "six-month" in normalized or "six month" in normalized:
-        return 2
-    if re.search(r"\bsept(?:ember)?\s+30\b", normalized) or "nine-month" in normalized or "nine month" in normalized:
+    if re.search(r"\bsept?(?:ember)?\s+30\b", normalized):
         return 3
+    if re.search(r"\bjun(?:e)?\s+30\b", normalized):
+        return 2
+    if re.search(r"\bmar(?:ch)?\s+31\b", normalized):
+        return 1
     return None
+
+
+def _duration_months_from_context(text: str) -> int:
+    normalized = re.sub(r"\s+", " ", text).lower()
+    durations: set[int] = set()
+    for word, months in (("three", 3), ("six", 6), ("nine", 9), ("twelve", 12)):
+        if re.search(rf"\b{word}[-\s]months?\b", normalized):
+            durations.add(months)
+    for match in re.finditer(r"\b(3|6|9|12)[-\s]months?\b", normalized):
+        durations.add(int(match.group(1)))
+    return next(iter(durations)) if len(durations) == 1 else 0
+
+
+def _quarter_label(year: int, quarter: int, duration_months: int) -> str:
+    base = f"Q{quarter} {year}"
+    return f"{duration_months}-Month {base}" if duration_months else base
 
 
 def _quarter_from_month_day(month: str, day: int) -> int | None:
