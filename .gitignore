@@ -16,3 +16,6 @@ codex/outputs/
 companies/**/final_excel/
 companies/**/*_financial_statements_final*.xlsx
 ~$*.xlsx
+
+# Local duplicated company folders (Windows copy suffix)
+companies/* - 副本/
