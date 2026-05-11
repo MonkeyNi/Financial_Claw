@@ -12,9 +12,8 @@ outputs/*
 codex/outputs/
 .local_tmp/
 *.egg-info/
-# Company pipeline outputs (Excel, debug)
-companies/**/final_excel/
-companies/**/*_financial_statements_final*.xlsx
+# Company pipeline: ignore debug artifacts only (track configs, PDFs, Excel outputs)
+companies/**/debug/
 ~$*.xlsx
 
 # Local duplicated company folders (Windows copy suffix)

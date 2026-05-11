@@ -23,25 +23,25 @@
       "file_name": "2 Goodman 2025 Annual Report.pdf",
       "source_path": "Financial_Statements/2 Goodman 2025 Annual Report.pdf",
       "sha256": "96c1d0733a336202550dc9e2e0fd8d05a156c1908355843cba40cb7ab42e30dd",
-      "mtime": 1778373820.8106177,
+      "mtime": 1778117777.8133864,
       "output_workbook": "final_excel/excel/GOODMAN_2_Goodman_2025_Annual_Report_statements.xlsx",
-      "processed_at": "2026-05-10T08:39:08.147305+00:00"
+      "processed_at": "2026-05-11T01:18:19.940399+00:00"
     },
     {
       "file_name": "Goodman 2024 Annual Report.pdf",
       "source_path": "Financial_Statements/Goodman 2024 Annual Report.pdf",
       "sha256": "26a948648543fcca776ec600df866d8a7e9b851434845d1aabe0e38cf4c147b4",
-      "mtime": 1778373820.9429917,
+      "mtime": 1778117777.9406567,
       "output_workbook": "final_excel/excel/GOODMAN_Goodman_2024_Annual_Report_statements.xlsx",
-      "processed_at": "2026-05-10T08:39:08.147795+00:00"
+      "processed_at": "2026-05-11T01:18:19.925952+00:00"
     },
     {
       "file_name": "Goodman Group Annual Report 2023.pdf",
       "source_path": "Financial_Statements/Goodman Group Annual Report 2023.pdf",
       "sha256": "f2f305088da086cc96dfcf19045e0084c32b1f19d83afdf80e8416e5853cbbd1",
-      "mtime": 1778373821.0560327,
+      "mtime": 1778117778.05863,
       "output_workbook": "final_excel/excel/GOODMAN_Goodman_Group_Annual_Report_2023_statements.xlsx",
-      "processed_at": "2026-05-10T08:39:08.148232+00:00"
+      "processed_at": "2026-05-11T01:18:19.909635+00:00"
     }
   ]
 }

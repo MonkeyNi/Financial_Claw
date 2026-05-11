@@ -20,49 +20,49 @@
       "file_name": "POSCO Holdings_consolidated_FY24 3Q_E.pdf",
       "source_path": "Financial_Statements/POSCO Holdings_consolidated_FY24 3Q_E.pdf",
       "sha256": "32c6e7de17a825eb9c1698ae9be83e7674056feed56268034fd80a2eaa2aeb29",
-      "mtime": 1778373821.4418254,
+      "mtime": 1778117778.439974,
       "output_workbook": "final_excel/excel/POSCO_POSCO_Holdings_consolidated_FY24_3Q_E_statements.xlsx",
-      "processed_at": "2026-05-10T09:01:02.569961+00:00"
+      "processed_at": "2026-05-11T01:19:03.680246+00:00"
     },
     {
       "file_name": "POSCO Holdings_Consolidated_FY24 4Q_E.pdf",
       "source_path": "Financial_Statements/POSCO Holdings_Consolidated_FY24 4Q_E.pdf",
       "sha256": "0e41357100f32dfaddf6aa772bdea723467ad1ce1166d40c38269e3ebb9ecab7",
-      "mtime": 1778373821.3937564,
+      "mtime": 1778117778.3939734,
       "output_workbook": "final_excel/excel/POSCO_POSCO_Holdings_Consolidated_FY24_4Q_E_statements.xlsx",
-      "processed_at": "2026-05-10T09:01:02.544678+00:00"
+      "processed_at": "2026-05-11T01:19:03.694362+00:00"
     },
     {
       "file_name": "POSCO Holdings_consolidated_FY25 1Q.pdf",
       "source_path": "Financial_Statements/POSCO Holdings_consolidated_FY25 1Q.pdf",
       "sha256": "9e78c98ff5ac727b7e020b049c9b6088f1b39a462d59a29cac05c0212eb2192f",
-      "mtime": 1778373821.478253,
+      "mtime": 1778117778.460975,
       "output_workbook": "final_excel/excel/POSCO_POSCO_Holdings_consolidated_FY25_1Q_statements.xlsx",
-      "processed_at": "2026-05-10T09:01:02.555701+00:00"
+      "processed_at": "2026-05-11T01:19:03.723080+00:00"
     },
     {
       "file_name": "POSCO Holdings_consolidated_FY25 2Q.pdf",
       "source_path": "Financial_Statements/POSCO Holdings_consolidated_FY25 2Q.pdf",
       "sha256": "4a440ef7498dfb0561a5ee1e4c8953dce00d7082f663b1cc079fdc2c3564b287",
-      "mtime": 1778373821.536702,
+      "mtime": 1778117778.5089748,
       "output_workbook": "final_excel/excel/POSCO_POSCO_Holdings_consolidated_FY25_2Q_statements.xlsx",
-      "processed_at": "2026-05-10T09:01:02.523100+00:00"
+      "processed_at": "2026-05-11T01:19:03.655478+00:00"
     },
     {
       "file_name": "POSCO Holdings_consolidated_FY25 3Q.pdf",
       "source_path": "Financial_Statements/POSCO Holdings_consolidated_FY25 3Q.pdf",
       "sha256": "7ee2917b1bf6f3718c3b7efef8906a4d2938e0d8f2203508d063c7977c915dd9",
-      "mtime": 1778373821.6016996,
+      "mtime": 1778117778.572977,
       "output_workbook": "final_excel/excel/POSCO_POSCO_Holdings_consolidated_FY25_3Q_statements.xlsx",
-      "processed_at": "2026-05-10T09:01:34.275597+00:00"
+      "processed_at": "2026-05-11T01:19:03.709004+00:00"
     },
     {
       "file_name": "POSCO_Holdings_consolidated_FY23_4Q_E.pdf",
       "source_path": "Financial_Statements/POSCO_Holdings_consolidated_FY23_4Q_E.pdf",
       "sha256": "547d1bec7831e50e863f799fff43310b3a4740a565f43b3ce127fae7af5843f5",
-      "mtime": 1778373821.6600606,
+      "mtime": 1778117778.6270301,
       "output_workbook": "final_excel/excel/POSCO_POSCO_Holdings_consolidated_FY23_4Q_E_statements.xlsx",
-      "processed_at": "2026-05-10T09:01:02.534113+00:00"
+      "processed_at": "2026-05-11T01:19:03.667321+00:00"
     }
   ]
 }

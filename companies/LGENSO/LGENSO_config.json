@@ -17,25 +17,25 @@
       "file_name": "2024_LGES_Audit_Report_Consolidated_FS_ENG.pdf",
       "source_path": "Financial_Statements/2024_LGES_Audit_Report_Consolidated_FS_ENG.pdf",
       "sha256": "0b3794fb8008e156ced477ec88032327b279ea59e8b4402fb9171109f8cf5bbe",
-      "mtime": 1778373821.1138916,
+      "mtime": 1778117778.1136305,
       "output_workbook": "final_excel/excel/LGENSO_2024_LGES_Audit_Report_Consolidated_FS_ENG_statements.xlsx",
-      "processed_at": "2026-05-10T09:47:52.407170+00:00"
+      "processed_at": "2026-05-11T01:18:27.232625+00:00"
     },
     {
       "file_name": "2025_LGES_Audit_Report_ConFS_ENG[0].pdf",
       "source_path": "Financial_Statements/2025_LGES_Audit_Report_ConFS_ENG[0].pdf",
       "sha256": "caa452db1d741d4eb9812deb8303c857e3617ca7a9fb88e2a2aa7da653f4699d",
-      "mtime": 1778373821.2335067,
+      "mtime": 1778117778.230494,
       "output_workbook": "final_excel/excel/LGENSO_2025_LGES_Audit_Report_ConFS_ENG_0_statements.xlsx",
-      "processed_at": "2026-05-10T09:47:52.407644+00:00"
+      "processed_at": "2026-05-11T01:18:27.247984+00:00"
     },
     {
       "file_name": "234Q_LGES_Audit_Report_CONFS_en.pdf",
       "source_path": "Financial_Statements/234Q_LGES_Audit_Report_CONFS_en.pdf",
       "sha256": "d202e075dd541a66561a8dfc700a2bf3f3a0fc2e4de7ed5a83b931e84d78835d",
-      "mtime": 1778373821.2961981,
+      "mtime": 1778117778.2824962,
       "output_workbook": "final_excel/excel/LGENSO_234Q_LGES_Audit_Report_CONFS_en_statements.xlsx",
-      "processed_at": "2026-05-10T09:47:52.408092+00:00"
+      "processed_at": "2026-05-11T01:18:27.261835+00:00"
     }
   ]
 }
